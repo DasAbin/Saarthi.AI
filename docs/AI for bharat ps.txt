@@ -1,0 +1,14 @@
+AI for Communities, Access & Public Impact
+
+Problem Statement: Build an AI-powered solution that improves access to information, resources, or opportunities for communities and public systems.
+
+What you may build:
+
+    Civic information or public service assistants
+    Education, awareness, or skill-development tools
+    AI systems that help communities access markets, resources, or programs
+    Local-language, voice-first, or low-bandwidth AI solutions
+
+Focus:
+
+Inclusion, accessibility, and real-world impact at a community or societal level.

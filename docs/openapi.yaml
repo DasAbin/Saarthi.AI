@@ -1,0 +1,354 @@
+openapi: 3.0.0
+info:
+  title: Saarthi.AI API
+  description: AI-powered public service assistant API
+  version: 1.0.0
+  contact:
+    name: Saarthi.AI Support
+    email: support@saarthi.ai
+
+servers:
+  - url: https://{apiGatewayId}.execute-api.{region}.amazonaws.com/prod
+    description: Production API Gateway
+    variables:
+      apiGatewayId:
+        default: your-api-gateway-id
+      region:
+        default: us-east-1
+
+paths:
+  /health:
+    get:
+      summary: Health check endpoint
+      operationId: healthCheck
+      tags:
+        - Health
+      responses:
+        '200':
+          description: Service is healthy
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  success:
+                    type: boolean
+                    example: true
+                  data:
+                    type: object
+                    properties:
+                      status:
+                        type: string
+                        example: ok
+
+  /query:
+    post:
+      summary: Query AI assistant with RAG
+      operationId: queryAI
+      tags:
+        - AI Query
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required:
+                - query
+                - language
+              properties:
+                query:
+                  type: string
+                  description: User query/question
+                  example: "What are the eligibility criteria for PMAY?"
+                language:
+                  type: string
+                  enum: [en, hi, mr]
+                  description: Language code
+                  example: en
+      responses:
+        '200':
+          description: Successful response
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  success:
+                    type: boolean
+                  data:
+                    type: object
+                    properties:
+                      answer:
+                        type: string
+                      sources:
+                        type: array
+                        items:
+                          type: object
+                          properties:
+                            text:
+                              type: string
+                            source:
+                              type: string
+                            page:
+                              type: integer
+                            score:
+                              type: number
+                      confidence:
+                        type: number
+                        minimum: 0
+                        maximum: 1
+        '400':
+          description: Bad request
+        '500':
+          description: Internal server error
+
+  /pdf:
+    post:
+      summary: Process and analyze PDF document
+      operationId: processPDF
+      tags:
+        - PDF Analysis
+      requestBody:
+        required: true
+        content:
+          multipart/form-data:
+            schema:
+              type: object
+              required:
+                - file
+              properties:
+                file:
+                  type: string
+                  format: binary
+                  description: PDF file to process
+      responses:
+        '200':
+          description: PDF processed successfully
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  success:
+                    type: boolean
+                  data:
+                    type: object
+                    properties:
+                      extracted_text:
+                        type: string
+                      summary:
+                        type: string
+                      points:
+                        type: array
+                        items:
+                          type: string
+                      s3_key:
+                        type: string
+        '400':
+          description: Invalid PDF file
+        '500':
+          description: Internal server error
+
+  /recommend:
+    post:
+      summary: Get personalized scheme recommendations
+      operationId: recommendSchemes
+      tags:
+        - Scheme Recommendation
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required:
+                - age
+                - state
+                - income
+                - occupation
+              properties:
+                age:
+                  type: integer
+                  minimum: 1
+                  maximum: 120
+                  example: 35
+                state:
+                  type: string
+                  example: Maharashtra
+                income:
+                  type: number
+                  minimum: 0
+                  example: 200000
+                occupation:
+                  type: string
+                  example: Farmer
+      responses:
+        '200':
+          description: Scheme recommendations
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  success:
+                    type: boolean
+                  data:
+                    type: object
+                    properties:
+                      schemes:
+                        type: array
+                        items:
+                          type: object
+                          properties:
+                            name:
+                              type: string
+                            description:
+                              type: string
+                            eligibility:
+                              type: array
+                              items:
+                                type: string
+                            apply_steps:
+                              type: array
+                              items:
+                                type: string
+                            link:
+                              type: string
+                              format: uri
+        '400':
+          description: Missing required fields
+        '500':
+          description: Internal server error
+
+  /voice/stt:
+    post:
+      summary: Convert speech to text
+      operationId: speechToText
+      tags:
+        - Voice
+      requestBody:
+        required: true
+        content:
+          multipart/form-data:
+            schema:
+              type: object
+              required:
+                - audio
+              properties:
+                audio:
+                  type: string
+                  format: binary
+                  description: Audio file (webm, mp3, wav)
+      responses:
+        '200':
+          description: Transcription successful
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  success:
+                    type: boolean
+                  data:
+                    type: object
+                    properties:
+                      text:
+                        type: string
+        '400':
+          description: Invalid audio file
+        '500':
+          description: Internal server error
+
+  /voice/tts:
+    post:
+      summary: Convert text to speech
+      operationId: textToSpeech
+      tags:
+        - Voice
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required:
+                - text
+              properties:
+                text:
+                  type: string
+                  description: Text to synthesize
+                  example: "Hello, how can I help you?"
+                language:
+                  type: string
+                  enum: [en, hi, mr]
+                  default: en
+                  example: en
+      responses:
+        '200':
+          description: Audio generated successfully
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  success:
+                    type: boolean
+                  data:
+                    type: object
+                    properties:
+                      audio:
+                        type: string
+                        format: byte
+                        description: Base64-encoded MP3 audio
+        '400':
+          description: Missing text
+        '500':
+          description: Internal server error
+
+  /grievance:
+    post:
+      summary: Generate formal complaint letter
+      operationId: generateGrievance
+      tags:
+        - Grievance
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required:
+                - issue_type
+                - description
+                - location
+              properties:
+                issue_type:
+                  type: string
+                  enum: [Water Supply, Road Maintenance, Garbage Collection, Electricity, Sewage, Street Lighting, Public Toilets, Park Maintenance, Other]
+                  example: Water Supply
+                description:
+                  type: string
+                  example: "No water supply for 3 days"
+                location:
+                  type: string
+                  example: "Ward 5, Sector 12, City Name"
+      responses:
+        '200':
+          description: Complaint letter generated
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  success:
+                    type: boolean
+                  data:
+                    type: object
+                    properties:
+                      complaint_letter:
+                        type: string
+        '400':
+          description: Missing required fields
+        '500':
+          description: Internal server error
