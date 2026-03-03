@@ -1,0 +1,3 @@
+"""
+RAG Query Lambda Handler
+"""

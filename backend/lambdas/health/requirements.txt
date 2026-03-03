@@ -1,1 +1,1 @@
-# No dependencies needed for health check
+# No external dependencies needed for health check

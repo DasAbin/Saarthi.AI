@@ -1,0 +1,3 @@
+"""
+Health Check Lambda Handler
+"""

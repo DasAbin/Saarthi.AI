@@ -16,13 +16,17 @@ export default function PDFAnalyzer() {
 
   const handleFileChange = (e: React.ChangeEvent<HTMLInputElement>) => {
     const selectedFile = e.target.files?.[0];
-    if (selectedFile && selectedFile.type === "application/pdf") {
+    if (
+      selectedFile &&
+      (selectedFile.type === "application/pdf" ||
+        selectedFile.type.startsWith("image/"))
+    ) {
       setFile(selectedFile);
       setResult(null);
     } else {
       toast({
         title: "Invalid file",
-        description: "Please select a PDF file",
+        description: "Please select a PDF or image file",
         variant: "destructive",
       });
     }
@@ -77,17 +81,17 @@ export default function PDFAnalyzer() {
               <input
                 ref={fileInputRef}
                 type="file"
-                accept=".pdf"
+                accept=".pdf,image/*"
                 onChange={handleFileChange}
                 className="hidden"
               />
-              <Button
-                variant="outline"
-                onClick={() => fileInputRef.current?.click()}
-                disabled={loading}
-              >
+                <Button
+                  variant="outline"
+                  onClick={() => fileInputRef.current?.click()}
+                  disabled={loading}
+                >
                 <Upload className="mr-2 h-4 w-4" />
-                Select PDF
+                Select document
               </Button>
               {file && (
                 <div className="flex items-center gap-2 text-sm text-slate-600">

@@ -74,12 +74,50 @@ AWS Services:
 
 ## 🚀 Quick Start
 
+### Local Development
+
+```bash
+# Backend
+cd backend/lambdas/rag_query
+pip install -r requirements.txt
+
+# Frontend
+cd frontend
+npm install
+npm run dev
+```
+
+### Deploy to AWS
+
+**Backend:**
+```bash
+cd infra
+npm install
+cdk bootstrap  # First time only
+cdk deploy
+```
+
+**Frontend:**
+```bash
+# Push to GitHub, then deploy via Amplify Console
+# Or use: ./scripts/deploy-frontend.sh
+```
+
+📖 **Full deployment guide:** [docs/DEPLOYMENT_GUIDE.md](./docs/DEPLOYMENT_GUIDE.md)  
+⚡ **Quick deploy:** [docs/QUICK_DEPLOY.md](./docs/QUICK_DEPLOY.md)
+
+## 🚀 Deployment
+
 ### Prerequisites
 
 - Node.js 18+ and npm
 - Python 3.12+
 - AWS CLI configured
 - AWS CDK installed (`npm install -g aws-cdk`)
+- **⚠️ Bedrock model access requested** (Claude + Titan)
+
+**📖 Quick start:** [START_HERE.md](./START_HERE.md)  
+**📚 Complete guide:** [HOW_TO_RUN.md](./HOW_TO_RUN.md)
 
 ### Frontend Setup
 

@@ -71,7 +71,11 @@ export default function VoiceAssistant() {
 
     try {
       // Step 1: Speech to Text
-      const sttResponse = await speechToText(audioBlob);
+      // Convert raw Blob from MediaRecorder into a File so our API helper accepts it
+      const audioFile = new File([audioBlob], "recording.webm", {
+        type: "audio/webm",
+      });
+      const sttResponse = await speechToText(audioFile);
       if (!sttResponse.success || !sttResponse.data) {
         throw new Error(sttResponse.message || "STT failed");
       }
@@ -96,11 +100,11 @@ export default function VoiceAssistant() {
 
       // Play audio
       const audioData = ttsResponse.data.audio;
-      const audioBlob = new Blob(
+      const ttsAudioBlob = new Blob(
         [Uint8Array.from(atob(audioData), (c) => c.charCodeAt(0))],
         { type: "audio/mpeg" }
       );
-      const audioUrl = URL.createObjectURL(audioBlob);
+      const audioUrl = URL.createObjectURL(ttsAudioBlob);
       const audio = new Audio(audioUrl);
       audioRef.current = audio;
 

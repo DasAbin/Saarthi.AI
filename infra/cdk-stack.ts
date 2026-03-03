@@ -4,7 +4,7 @@
  * This stack creates:
  * - API Gateway
  * - Lambda functions for each endpoint
- * - OpenSearch Serverless collection and index
+ * - DynamoDB table for vector storage
  * - S3 buckets for PDFs and embeddings
  * - IAM roles with least privilege
  * - CloudWatch logs
@@ -14,9 +14,9 @@ import * as cdk from 'aws-cdk-lib';
 import * as lambda from 'aws-cdk-lib/aws-lambda';
 import * as apigateway from 'aws-cdk-lib/aws-apigateway';
 import * as s3 from 'aws-cdk-lib/aws-s3';
+import * as dynamodb from 'aws-cdk-lib/aws-dynamodb';
 import * as iam from 'aws-cdk-lib/aws-iam';
 import * as logs from 'aws-cdk-lib/aws-logs';
-import * as opensearchserverless from 'aws-cdk-lib/aws-opensearchserverless';
 import { Construct } from 'constructs';
 
 export class SaarthiAiStack extends cdk.Stack {
@@ -49,18 +49,16 @@ export class SaarthiAiStack extends cdk.Stack {
       }],
     });
 
-    // OpenSearch Serverless Collection
-    const collection = new opensearchserverless.CfnCollection(this, 'SaarthiCollection', {
-      name: 'saarthi-collection',
-      type: 'VECTORSEARCH',
-      description: 'Vector search collection for Saarthi.AI RAG',
-    });
-
-    // OpenSearch Serverless Index
-    const index = new opensearchserverless.CfnIndex(this, 'SaarthiIndex', {
-      collectionName: collection.name!,
-      name: 'saarthi-index',
-      type: 'vectorsearch',
+    // DynamoDB Table for Vector Storage
+    const vectorsTable = new dynamodb.Table(this, 'SaarthiVectorsTable', {
+      tableName: 'saarthi-vectors',
+      partitionKey: { name: 'chunk_id', type: dynamodb.AttributeType.STRING },
+      sortKey: { name: 'metadata', type: dynamodb.AttributeType.STRING },
+      billingMode: dynamodb.BillingMode.PAY_PER_REQUEST,
+      removalPolicy: cdk.RemovalPolicy.RETAIN,
+      pointInTimeRecoverySpecification: {
+        pointInTimeRecoveryEnabled: true,
+      },
     });
 
     // Lambda Execution Role
@@ -71,17 +69,16 @@ export class SaarthiAiStack extends cdk.Stack {
       ],
     });
 
-    // Grant Bedrock permissions
+    // Grant Bedrock permissions (allow any Bedrock model so TEXT_MODEL_ID can be changed freely)
     lambdaRole.addToPolicy(new iam.PolicyStatement({
       effect: iam.Effect.ALLOW,
       actions: [
         'bedrock:InvokeModel',
+        'bedrock:Converse',
+        'bedrock:ConverseStream',
         'bedrock:InvokeModelWithResponseStream',
       ],
-      resources: [
-        `arn:aws:bedrock:${this.region}::foundation-model/anthropic.claude-3-sonnet-20240229-v1:0`,
-        `arn:aws:bedrock:${this.region}::foundation-model/amazon.titan-embed-text-v1`,
-      ],
+      resources: ['*'],
     }));
 
     // Grant S3 permissions
@@ -121,14 +118,8 @@ export class SaarthiAiStack extends cdk.Stack {
       resources: ['*'],
     }));
 
-    // Grant OpenSearch Serverless permissions
-    lambdaRole.addToPolicy(new iam.PolicyStatement({
-      effect: iam.Effect.ALLOW,
-      actions: [
-        'aoss:APIAccessAll',
-      ],
-      resources: [collection.attrArn],
-    }));
+    // Grant DynamoDB permissions
+    vectorsTable.grantReadWriteData(lambdaRole);
 
     // Lambda Functions
     const commonLambdaProps = {
@@ -137,13 +128,17 @@ export class SaarthiAiStack extends cdk.Stack {
       timeout: cdk.Duration.minutes(5),
       memorySize: 512,
       environment: {
-        AWS_REGION: this.region,
         PDF_BUCKET: pdfBucket.bucketName,
         EMBEDDINGS_BUCKET: embeddingsBucket.bucketName,
         TEMP_AUDIO_BUCKET: tempAudioBucket.bucketName,
-        OPENSEARCH_ENDPOINT: collection.attrCollectionEndpoint || '',
-        OPENSEARCH_INDEX: index.name!,
-        OPENSEARCH_COLLECTION: collection.name!,
+        DYNAMODB_TABLE: vectorsTable.tableName,
+        // Optional: override these at deploy-time or in the Lambda console
+        // when AWS retires or replaces a specific model version.
+        // Recommended defaults for ap-south-1:
+        // - Nova Micro via APAC inference profile (Converse API)
+        // - Titan Embeddings V2 (InvokeModel API)
+        TEXT_MODEL_ID: process.env.TEXT_MODEL_ID ?? 'apac.amazon.nova-micro-v1:0',
+        EMBEDDING_MODEL_ID: process.env.EMBEDDING_MODEL_ID ?? 'amazon.titan-embed-text-v2:0',
       },
       logRetention: logs.RetentionDays.ONE_WEEK,
     };
@@ -151,16 +146,17 @@ export class SaarthiAiStack extends cdk.Stack {
     const ragQueryLambda = new lambda.Function(this, 'RagQueryLambda', {
       ...commonLambdaProps,
       functionName: 'saarthi-rag-query',
-      code: lambda.Code.fromAsset('backend/lambdas/rag_query'),
-      handler: 'handler.handler',
+      // Package the entire backend so shared utils are available to all Lambdas
+      code: lambda.Code.fromAsset('../backend'),
+      handler: 'lambdas/rag_query/handler.handler',
       memorySize: 1024, // More memory for RAG processing
     });
 
     const pdfProcessLambda = new lambda.Function(this, 'PdfProcessLambda', {
       ...commonLambdaProps,
       functionName: 'saarthi-pdf-process',
-      code: lambda.Code.fromAsset('backend/lambdas/pdf_process'),
-      handler: 'handler.handler',
+      code: lambda.Code.fromAsset('../backend'),
+      handler: 'lambdas/pdf_process/handler.handler',
       memorySize: 2048, // More memory for PDF processing
       timeout: cdk.Duration.minutes(10),
     });
@@ -168,37 +164,37 @@ export class SaarthiAiStack extends cdk.Stack {
     const recommendSchemesLambda = new lambda.Function(this, 'RecommendSchemesLambda', {
       ...commonLambdaProps,
       functionName: 'saarthi-recommend-schemes',
-      code: lambda.Code.fromAsset('backend/lambdas/recommend_schemes'),
-      handler: 'handler.handler',
+      code: lambda.Code.fromAsset('../backend'),
+      handler: 'lambdas/recommend_schemes/handler.handler',
     });
 
     const sttHandlerLambda = new lambda.Function(this, 'SttHandlerLambda', {
       ...commonLambdaProps,
       functionName: 'saarthi-stt-handler',
-      code: lambda.Code.fromAsset('backend/lambdas/stt_handler'),
-      handler: 'handler.handler',
+      code: lambda.Code.fromAsset('../backend'),
+      handler: 'lambdas/stt_handler/handler.handler',
       timeout: cdk.Duration.minutes(10), // Transcribe can take time
     });
 
     const ttsHandlerLambda = new lambda.Function(this, 'TtsHandlerLambda', {
       ...commonLambdaProps,
       functionName: 'saarthi-tts-handler',
-      code: lambda.Code.fromAsset('backend/lambdas/tts_handler'),
-      handler: 'handler.handler',
+      code: lambda.Code.fromAsset('../backend'),
+      handler: 'lambdas/tts_handler/handler.handler',
     });
 
     const grievanceHandlerLambda = new lambda.Function(this, 'GrievanceHandlerLambda', {
       ...commonLambdaProps,
       functionName: 'saarthi-grievance-handler',
-      code: lambda.Code.fromAsset('backend/lambdas/grievance_handler'),
-      handler: 'handler.handler',
+      code: lambda.Code.fromAsset('../backend'),
+      handler: 'lambdas/grievance_handler/handler.handler',
     });
 
     const healthLambda = new lambda.Function(this, 'HealthLambda', {
       ...commonLambdaProps,
       functionName: 'saarthi-health',
-      code: lambda.Code.fromAsset('backend/lambdas/health'),
-      handler: 'handler.handler',
+      code: lambda.Code.fromAsset('../backend'),
+      handler: 'lambdas/health/handler.handler',
       memorySize: 128,
     });
 
@@ -246,9 +242,9 @@ export class SaarthiAiStack extends cdk.Stack {
       description: 'PDF Storage Bucket',
     });
 
-    new cdk.CfnOutput(this, 'OpenSearchCollectionEndpoint', {
-      value: collection.attrCollectionEndpoint || '',
-      description: 'OpenSearch Serverless Collection Endpoint',
+    new cdk.CfnOutput(this, 'DynamoDBTableName', {
+      value: vectorsTable.tableName,
+      description: 'DynamoDB Table for Vector Storage',
     });
   }
 }

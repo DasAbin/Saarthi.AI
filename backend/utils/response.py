@@ -62,7 +62,7 @@ def lambda_response(
         Lambda response dictionary
     """
     default_headers = {
-        "Content-Type": "application/json",
+        "Content-Type": "application/json; charset=utf-8",
         "Access-Control-Allow-Origin": "*",
         "Access-Control-Allow-Headers": "Content-Type",
         "Access-Control-Allow-Methods": "GET,POST,OPTIONS"
@@ -74,5 +74,6 @@ def lambda_response(
     return {
         "statusCode": status_code,
         "headers": default_headers,
-        "body": json.dumps(body)
+        # ensure_ascii=False so Hindi/Marathi/etc render correctly end-to-end
+        "body": json.dumps(body, ensure_ascii=False)
     }

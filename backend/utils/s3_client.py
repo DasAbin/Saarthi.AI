@@ -4,8 +4,11 @@ S3 client utilities for document storage.
 
 import boto3
 import os
+import logging
 from typing import Optional
 from botocore.exceptions import ClientError
+
+logger = logging.getLogger(__name__)
 
 s3_client = boto3.client("s3", region_name=os.getenv("AWS_REGION", "us-east-1"))
 
@@ -104,3 +107,21 @@ def load_embeddings(key: str) -> Optional[dict]:
         return json.loads(response["Body"].read())
     except ClientError:
         return None
+
+
+def load_faiss_index() -> Optional[dict]:
+    """
+    Legacy stub kept for backward compatibility.
+    Vector storage is now handled via DynamoDB, so this always returns None.
+    """
+    logger.info("load_faiss_index called but FAISS support is disabled; returning None")
+    return None
+
+
+def save_faiss_index(index, metadata: dict) -> bool:
+    """
+    Legacy stub kept for backward compatibility.
+    Vector storage is now handled via DynamoDB, so this is a no-op.
+    """
+    logger.info("save_faiss_index called but FAISS support is disabled; returning False")
+    return False
