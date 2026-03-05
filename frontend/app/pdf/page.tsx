@@ -9,7 +9,7 @@ import { ErrorMessage } from "@/components/common/ErrorMessage";
 import { processPDF } from "@/lib/api/pdf";
 import { useToast } from "@/components/ui/use-toast";
 import type { PDFProcessResponse } from "@/lib/types";
-import { MAX_FILE_SIZE, ALLOWED_PDF_TYPES } from "@/lib/utils/constants";
+import { MAX_FILE_SIZE, ALLOWED_DOCUMENT_TYPES } from "@/lib/utils/constants";
 
 export default function PDFPage() {
   const [file, setFile] = useState<File | null>(null);
@@ -23,11 +23,11 @@ export default function PDFPage() {
     const selectedFile = e.target.files?.[0];
     if (!selectedFile) return;
 
-    if (!ALLOWED_PDF_TYPES.includes(selectedFile.type)) {
-      setError("Please select a PDF file");
+    if (!ALLOWED_DOCUMENT_TYPES.includes(selectedFile.type)) {
+      setError("Please select a PDF, DOCX, TXT, HTML, or image file");
       toast({
         title: "Invalid file",
-        description: "Please select a PDF file",
+        description: "Supported: PDF, DOCX, TXT, HTML, PNG, JPG",
         variant: "destructive",
       });
       return;
@@ -78,7 +78,7 @@ export default function PDFPage() {
     const url = URL.createObjectURL(blob);
     const a = document.createElement("a");
     a.href = url;
-    a.download = `${file?.name.replace(".pdf", "") || "document"}_extracted.txt`;
+    a.download = `${file?.name.replace(/\.[^.]+$/, "") || "document"}_extracted.txt`;
     a.click();
     URL.revokeObjectURL(url);
   };
@@ -87,9 +87,9 @@ export default function PDFPage() {
     <div className="container py-8">
       <div className="mx-auto max-w-4xl">
         <div className="mb-8">
-          <h1 className="text-3xl font-bold mb-2">PDF Analyzer</h1>
+          <h1 className="text-3xl font-bold mb-2">Document Analyzer</h1>
           <p className="text-muted-foreground">
-            Upload government policy PDFs and get instant summaries
+            Upload government documents (PDF, DOCX, TXT, HTML, or images) and get instant summaries
           </p>
         </div>
 
@@ -100,7 +100,7 @@ export default function PDFPage() {
                 <input
                   ref={fileInputRef}
                   type="file"
-                  accept=".pdf"
+                  accept=".pdf,.docx,.doc,.txt,.html,.htm,.png,.jpg,.jpeg"
                   onChange={handleFileChange}
                   className="hidden"
                 />
@@ -110,7 +110,7 @@ export default function PDFPage() {
                   disabled={loading}
                 >
                   <Upload className="mr-2 h-4 w-4" />
-                  Select PDF
+                  Select Document
                 </Button>
                 {file && (
                   <div className="flex items-center gap-2 text-sm text-muted-foreground">
@@ -133,7 +133,7 @@ export default function PDFPage() {
                   ) : (
                     <>
                       <FileText className="mr-2 h-4 w-4" />
-                      Analyze PDF
+                      Analyze Document
                     </>
                   )}
                 </Button>

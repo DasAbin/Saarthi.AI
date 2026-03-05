@@ -1,14 +1,26 @@
 /**
  * Base API client for Saarthi.AI
- * Uses Next.js API routes which proxy to AWS API Gateway
+ * Always calls Next.js API routes (/api/*) which act as the proxy layer.
+ *
+ * The Next.js routes either:
+ *   - Forward to the real AWS API Gateway (when NEXT_PUBLIC_API_GATEWAY_URL is set server-side)
+ *   - Process documents locally (e.g. /api/pdf uses PyMuPDF directly)
+ *   - Hit the local mock backend (when pointed at localhost:3001)
+ *
+ * ✅ NEVER call AWS directly from the browser — that bypasses all our
+ *    server-side logic and causes 502 / CORS / auth errors.
  */
 
 import type { ApiResponse } from "@/lib/types";
 
+// Always route through the Next.js API layer — never call AWS directly.
+const DEFAULT_BASE_URL = "/api";
+
+
 class ApiClient {
   private baseUrl: string;
 
-  constructor(baseUrl: string = "/api") {
+  constructor(baseUrl: string = DEFAULT_BASE_URL) {
     this.baseUrl = baseUrl;
   }
 
@@ -24,8 +36,8 @@ class ApiClient {
     const defaultHeaders: HeadersInit = isFormData
       ? {}
       : {
-          "Content-Type": "application/json",
-        };
+        "Content-Type": "application/json",
+      };
 
     const config: RequestInit = {
       ...options,
