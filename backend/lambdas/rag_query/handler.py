@@ -8,15 +8,23 @@ This handler processes user queries using:
 """
 
 import json
+import logging
 import os
 import sys
-import logging
-from typing import Dict, Any, Optional
+from typing import Any, Dict, Optional
 
 # Add parent directory to path for imports
 sys.path.append(os.path.join(os.path.dirname(__file__), "../.."))
 
-from utils.response import success_response, error_response, lambda_response
+from utils.response import error_response, lambda_response, success_response
+from rag.retriever import retrieve_relevant_chunks
+from rag.generator import generate_answer
+from services.query_cache import (
+    get_cached_response,
+    make_query_hash,
+    put_cached_response,
+)
+from services.conversation_store import append_conversation_event
 
 # Configure logging
 logger = logging.getLogger()
@@ -53,17 +61,6 @@ def handler(event: Dict[str, Any], context: Any) -> Dict[str, Any]:
     try:
         logger.info("RAG query handler invoked")
 
-        # Lazy-import Bedrock client so that import errors
-        # are caught and returned as proper JSON instead of generic 500s.
-        try:
-            from utils.aws.bedrock import invoke_claude  # type: ignore
-        except Exception as import_err:
-            logger.error(f"Failed to import Bedrock client: {import_err}", exc_info=True)
-            return lambda_response(
-                500,
-                error_response(f"RAG pipeline is not available: {import_err}")
-            )
-        
         # Parse request body
         if isinstance(event.get("body"), str):
             body = json.loads(event["body"])
@@ -73,6 +70,9 @@ def handler(event: Dict[str, Any], context: Any) -> Dict[str, Any]:
         # Validate input
         query = body.get("query", "").strip()
         language = body.get("language", "en")
+        document_id: Optional[str] = body.get("document_id")
+        user_id: str = body.get("user_id") or event.get("requestContext", {}).get("identity", {}).get("user", "") or "anonymous"
+        session_id: str = body.get("session_id") or event.get("headers", {}).get("x-session-id", "") or "default"
         
         if not query:
             logger.warning("Empty query received")
@@ -88,49 +88,93 @@ def handler(event: Dict[str, Any], context: Any) -> Dict[str, Any]:
                 error_response("Language must be 'en', 'hi', or 'mr'")
             )
         
-        logger.info(f"Processing query: {query[:100]}... (language: {language})")
+        logger.info(f"Processing query: {query[:100]}... (language: {language}, document_id={document_id})")
 
         language_name = {"en": "English", "hi": "Hindi", "mr": "Marathi"}[language]
-        language_instruction = (
-            f"Respond in {language_name}. "
-            "Do not include translations to other languages. "
-            "Use the native script for the language (Hindi/Marathi in Devanagari)."
+        # Cache key includes query, language, and optional document_id
+        q_hash = make_query_hash(query, language, document_id)
+        cached = get_cached_response(q_hash)
+        if cached:
+            logger.info("Returning cached response for hash %s", q_hash[:8])
+            # Also append to conversation log asynchronously (best effort)
+            try:
+                append_conversation_event(
+                    user_id=user_id,
+                    session_id=session_id,
+                    query=query,
+                    response=cached.get("answer", ""),
+                    extra={"cached": True, "document_id": document_id},
+                )
+            except Exception as e:
+                logger.warning("Failed to append cached conversation event: %s", str(e))
+
+            return lambda_response(200, success_response(cached))
+
+        # Retrieve context from vector store (optionally filtered by document_id)
+        logger.info("Retrieving context chunks for query...")
+        filters: Optional[Dict[str, Any]] = None
+        if document_id:
+            filters = {"document_id": document_id}
+
+        context_chunks = retrieve_relevant_chunks(
+            query=query,
+            top_k=5,
+            filter_dict=filters,
         )
 
-        # NOTE: For now, we skip vector-store retrieval in Lambda (to avoid heavy
-        # native deps like NumPy/FAISS) and directly query Claude with a
-        # government-schemes-focused system prompt. This still uses real
-        # Bedrock (Claude 3 Sonnet) and gives high-quality answers.
-        logger.info("Generating answer with Claude (no vector store retrieval)...")
-        system_prompt = (
-            "You are a helpful AI assistant providing accurate information about "
-            "Indian government schemes and policies. Always cite your sources when "
-            "referring to specific documents or schemes. "
-            + language_instruction
-        )
-        
-        answer = invoke_claude(
-            prompt=(
-                "Answer the following question. "
-                "If the question is not about Indian government schemes/policies, still answer helpfully, "
-                "but prioritize official Indian government sources where applicable.\n\n"
-                f"Question: {query}"
-            ),
-            system_prompt=system_prompt,
-            max_tokens=2048,
-            temperature=0.7
-        )
-
-        logger.info("Generated answer from Claude (no context retrieval).")
-
-        return lambda_response(
-            200,
-            success_response({
+        # Generate answer with Bedrock, with hackathon-grade fallback
+        try:
+            logger.info("Generating answer with Bedrock (Nova Micro)...")
+            answer = generate_answer(query, context_chunks)
+            success_payload = {
                 "answer": answer,
-                "sources": [],
-                "confidence": 0.5
-            })
-        )
+                "sources": context_chunks,
+                "confidence": 0.9 if context_chunks else 0.6,
+            }
+        except Exception as gen_err:
+            logger.error("Bedrock generation failed: %s", str(gen_err))
+            # Fallback response required for hackathon
+            preview_sources = [
+                {
+                    "text": c.get("text", "")[:400],
+                    "source": c.get("source", "Unknown"),
+                    "score": c.get("score", 0.0),
+                }
+                for c in (context_chunks or [])[:5]
+            ]
+            fallback_answer = (
+                "We could not generate a detailed response at the moment. "
+                "Based on available information, here are the relevant scheme details:\n\n"
+            )
+            for src in preview_sources:
+                fallback_answer += f"- From {src['source']}: {src['text']}\n"
+
+            success_payload = {
+                "answer": fallback_answer.strip(),
+                "sources": context_chunks,
+                "confidence": 0.4,
+                "fallback": True,
+            }
+
+        # Store in cache (best effort)
+        try:
+            put_cached_response(q_hash, success_payload)
+        except Exception as cache_err:
+            logger.warning("Failed to write query cache: %s", str(cache_err))
+
+        # Store conversation in S3 (best effort)
+        try:
+            append_conversation_event(
+                user_id=user_id,
+                session_id=session_id,
+                query=query,
+                response=success_payload.get("answer", ""),
+                extra={"document_id": document_id, "from_cache": False},
+            )
+        except Exception as conv_err:
+            logger.warning("Failed to append conversation event: %s", str(conv_err))
+
+        return lambda_response(200, success_response(success_payload))
         
     except json.JSONDecodeError as e:
         logger.error(f"JSON decode error: {str(e)}")

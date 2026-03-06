@@ -1,16 +1,24 @@
 "use client";
 
 import { useState, useRef } from "react";
-import { Upload, FileText, Loader2, Download, CheckCircle2 } from "lucide-react";
+import {
+  Upload,
+  FileText,
+  Loader2,
+  Download,
+  CheckCircle2,
+  Info,
+} from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent } from "@/components/ui/card";
-import { processPDF, type PDFProcessResponse } from "@/lib/api";
+import { processPDF } from "@/lib/api/pdf";
+import type { PDFProcessResponse } from "@/lib/types";
 import { useToast } from "@/components/ui/use-toast";
 
 export default function PDFAnalyzer() {
   const [file, setFile] = useState<File | null>(null);
   const [loading, setLoading] = useState(false);
-  const [result, setResult] = useState<PDFProcessResponse["data"] | null>(null);
+  const [result, setResult] = useState<PDFProcessResponse | null>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
   const { toast } = useToast();
 
@@ -39,16 +47,8 @@ export default function PDFAnalyzer() {
     setResult(null);
 
     try {
-      const response = await processPDF(file);
-      if (response.success && response.data) {
-        setResult(response.data);
-      } else {
-        toast({
-          title: "Error",
-          description: response.message || "Failed to process PDF",
-          variant: "destructive",
-        });
-      }
+      const data = await processPDF(file);
+      setResult(data);
     } catch (error) {
       toast({
         title: "Error",
@@ -124,24 +124,33 @@ export default function PDFAnalyzer() {
       {/* Results */}
       {result && (
         <div className="space-y-4">
-          {/* Summary */}
+          {/* High-level document info */}
           <Card>
-            <CardContent className="pt-6">
-              <h3 className="font-semibold text-lg mb-4 flex items-center gap-2">
-                <CheckCircle2 className="h-5 w-5 text-emerald-600" />
-                Summary
+            <CardContent className="pt-6 space-y-2">
+              <h3 className="font-semibold text-lg mb-2 flex items-center gap-2">
+                <Info className="h-5 w-5 text-indigo-600" />
+                Document Overview
               </h3>
-              <p className="text-slate-700 whitespace-pre-wrap">{result.summary}</p>
+              <p className="text-sm text-slate-600">
+                <span className="font-semibold">Document Type:</span>{" "}
+                {result.document_type || "Unknown"}
+              </p>
+              {result.purpose && (
+                <p className="text-sm text-slate-600">
+                  <span className="font-semibold">Purpose:</span>{" "}
+                  {result.purpose}
+                </p>
+              )}
             </CardContent>
           </Card>
 
-          {/* Key Points */}
-          {result.points && result.points.length > 0 && (
+          {/* Key Information */}
+          {result.key_points && result.key_points.length > 0 && (
             <Card>
               <CardContent className="pt-6">
-                <h3 className="font-semibold text-lg mb-4">Key Points</h3>
+                <h3 className="font-semibold text-lg mb-4">Key Information</h3>
                 <ul className="space-y-2">
-                  {result.points.map((point, idx) => (
+                  {result.key_points.map((point, idx) => (
                     <li key={idx} className="flex items-start gap-2">
                       <span className="text-indigo-600 mt-1">•</span>
                       <span className="text-slate-700">{point}</span>
@@ -151,6 +160,38 @@ export default function PDFAnalyzer() {
               </CardContent>
             </Card>
           )}
+
+          {/* Important Instructions */}
+          {result.instructions && result.instructions.length > 0 && (
+            <Card>
+              <CardContent className="pt-6">
+                <h3 className="font-semibold text-lg mb-4">
+                  Important Instructions
+                </h3>
+                <ul className="space-y-2">
+                  {result.instructions.map((inst, idx) => (
+                    <li key={idx} className="flex items-start gap-2">
+                      <span className="text-indigo-600 mt-1">•</span>
+                      <span className="text-slate-700">{inst}</span>
+                    </li>
+                  ))}
+                </ul>
+              </CardContent>
+            </Card>
+          )}
+
+          {/* Summary */}
+          <Card>
+            <CardContent className="pt-6">
+              <h3 className="font-semibold text-lg mb-4 flex items-center gap-2">
+                <CheckCircle2 className="h-5 w-5 text-emerald-600" />
+                Summary
+              </h3>
+              <p className="text-slate-700 whitespace-pre-wrap">
+                {result.summary}
+              </p>
+            </CardContent>
+          </Card>
 
           {/* Extracted Text */}
           <Card>
@@ -163,7 +204,9 @@ export default function PDFAnalyzer() {
                 </Button>
               </div>
               <div className="max-h-96 overflow-y-auto bg-slate-50 p-4 rounded-md">
-                <p className="text-sm text-slate-700 whitespace-pre-wrap">{result.extracted_text}</p>
+                <p className="text-sm text-slate-700 whitespace-pre-wrap">
+                  {result.extracted_text}
+                </p>
               </div>
             </CardContent>
           </Card>

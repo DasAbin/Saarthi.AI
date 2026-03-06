@@ -23,8 +23,8 @@ const features = [
   },
   {
     id: "pdf",
-    title: "Document Analyzer",
-    description: "Upload PDFs, DOCX, TXT, HTML or images — get instant summaries",
+    title: "PDF Analyzer",
+    description: "Upload and analyze government policy PDFs",
     icon: FileText,
     href: "/pdf",
     color: "text-amber-600",

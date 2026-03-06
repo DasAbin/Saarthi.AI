@@ -1,8 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 
-// Server-side only — never exposed to the browser.
 const API_GATEWAY_URL =
-  process.env.API_GATEWAY_URL ||
   process.env.NEXT_PUBLIC_API_GATEWAY_URL ||
   "https://your-api-gateway-url.execute-api.region.amazonaws.com/prod";
 

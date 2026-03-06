@@ -1,7 +1,7 @@
 "use client";
 
 import { useState, useRef } from "react";
-import { Upload, FileText, Loader2, Download, CheckCircle2 } from "lucide-react";
+import { Upload, FileText, Loader2, Download, CheckCircle2, Info } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { LoadingSpinner } from "@/components/common/LoadingSpinner";
@@ -9,7 +9,7 @@ import { ErrorMessage } from "@/components/common/ErrorMessage";
 import { processPDF } from "@/lib/api/pdf";
 import { useToast } from "@/components/ui/use-toast";
 import type { PDFProcessResponse } from "@/lib/types";
-import { MAX_FILE_SIZE, ALLOWED_DOCUMENT_TYPES } from "@/lib/utils/constants";
+import { MAX_FILE_SIZE, ALLOWED_PDF_TYPES } from "@/lib/utils/constants";
 
 export default function PDFPage() {
   const [file, setFile] = useState<File | null>(null);
@@ -23,11 +23,11 @@ export default function PDFPage() {
     const selectedFile = e.target.files?.[0];
     if (!selectedFile) return;
 
-    if (!ALLOWED_DOCUMENT_TYPES.includes(selectedFile.type)) {
-      setError("Please select a PDF, DOCX, TXT, HTML, or image file");
+    if (!ALLOWED_PDF_TYPES.includes(selectedFile.type)) {
+      setError("Please select a PDF file");
       toast({
         title: "Invalid file",
-        description: "Supported: PDF, DOCX, TXT, HTML, PNG, JPG",
+        description: "Please select a PDF file",
         variant: "destructive",
       });
       return;
@@ -78,7 +78,7 @@ export default function PDFPage() {
     const url = URL.createObjectURL(blob);
     const a = document.createElement("a");
     a.href = url;
-    a.download = `${file?.name.replace(/\.[^.]+$/, "") || "document"}_extracted.txt`;
+    a.download = `${file?.name.replace(".pdf", "") || "document"}_extracted.txt`;
     a.click();
     URL.revokeObjectURL(url);
   };
@@ -89,7 +89,7 @@ export default function PDFPage() {
         <div className="mb-8">
           <h1 className="text-3xl font-bold mb-2">Document Analyzer</h1>
           <p className="text-muted-foreground">
-            Upload government documents (PDF, DOCX, TXT, HTML, or images) and get instant summaries
+            Upload government policy documents (PDF, Word, images) and get instant summaries
           </p>
         </div>
 
@@ -100,7 +100,7 @@ export default function PDFPage() {
                 <input
                   ref={fileInputRef}
                   type="file"
-                  accept=".pdf,.docx,.doc,.txt,.html,.htm,.png,.jpg,.jpeg"
+                  accept=".pdf,.doc,.docx,.txt,image/*"
                   onChange={handleFileChange}
                   className="hidden"
                 />
@@ -110,7 +110,7 @@ export default function PDFPage() {
                   disabled={loading}
                 >
                   <Upload className="mr-2 h-4 w-4" />
-                  Select Document
+                  Select document
                 </Button>
                 {file && (
                   <div className="flex items-center gap-2 text-sm text-muted-foreground">
@@ -133,7 +133,7 @@ export default function PDFPage() {
                   ) : (
                     <>
                       <FileText className="mr-2 h-4 w-4" />
-                      Analyze Document
+                      Analyze PDF
                     </>
                   )}
                 </Button>
@@ -152,6 +152,67 @@ export default function PDFPage() {
 
         {result && (
           <div className="space-y-4">
+            {/* High-level document info */}
+            <Card>
+              <CardHeader>
+                <CardTitle className="flex items-center gap-2">
+                  <Info className="h-5 w-5 text-primary" />
+                  Document Overview
+                </CardTitle>
+              </CardHeader>
+              <CardContent className="space-y-2">
+                <p className="text-sm text-muted-foreground">
+                  <span className="font-semibold">Document Type:</span>{" "}
+                  {result.document_type || "Unknown"}
+                </p>
+                {result.purpose && (
+                  <p className="text-sm text-muted-foreground">
+                    <span className="font-semibold">Purpose:</span>{" "}
+                    {result.purpose}
+                  </p>
+                )}
+              </CardContent>
+            </Card>
+
+            {/* Key Information */}
+            {result.key_points && result.key_points.length > 0 && (
+              <Card>
+                <CardHeader>
+                  <CardTitle>Key Information</CardTitle>
+                </CardHeader>
+                <CardContent>
+                  <ul className="space-y-2">
+                    {result.key_points.map((point, idx) => (
+                      <li key={idx} className="flex items-start gap-2">
+                        <span className="text-primary mt-1">•</span>
+                        <span className="text-foreground">{point}</span>
+                      </li>
+                    ))}
+                  </ul>
+                </CardContent>
+              </Card>
+            )}
+
+            {/* Important Instructions */}
+            {result.instructions && result.instructions.length > 0 && (
+              <Card>
+                <CardHeader>
+                  <CardTitle>Important Instructions</CardTitle>
+                </CardHeader>
+                <CardContent>
+                  <ul className="space-y-2">
+                    {result.instructions.map((inst, idx) => (
+                      <li key={idx} className="flex items-start gap-2">
+                        <span className="text-primary mt-1">•</span>
+                        <span className="text-foreground">{inst}</span>
+                      </li>
+                    ))}
+                  </ul>
+                </CardContent>
+              </Card>
+            )}
+
+            {/* Summary */}
             <Card>
               <CardHeader>
                 <CardTitle className="flex items-center gap-2">
@@ -166,24 +227,7 @@ export default function PDFPage() {
               </CardContent>
             </Card>
 
-            {result.points && result.points.length > 0 && (
-              <Card>
-                <CardHeader>
-                  <CardTitle>Key Points</CardTitle>
-                </CardHeader>
-                <CardContent>
-                  <ul className="space-y-2">
-                    {result.points.map((point, idx) => (
-                      <li key={idx} className="flex items-start gap-2">
-                        <span className="text-primary mt-1">•</span>
-                        <span className="text-foreground">{point}</span>
-                      </li>
-                    ))}
-                  </ul>
-                </CardContent>
-              </Card>
-            )}
-
+            {/* Extracted Text */}
             <Card>
               <CardHeader>
                 <div className="flex items-center justify-between">

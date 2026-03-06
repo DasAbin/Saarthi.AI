@@ -49,7 +49,17 @@ export class SaarthiAiStack extends cdk.Stack {
       }],
     });
 
-    // DynamoDB Table for Vector Storage
+    // S3 bucket for conversation logs
+    const conversationsBucket = new s3.Bucket(this, 'SaarthiConversationsBucket', {
+      bucketName: `saarthi-conversations-${this.account}-${this.region}`,
+      removalPolicy: cdk.RemovalPolicy.RETAIN,
+      encryption: s3.BucketEncryption.S3_MANAGED,
+      lifecycleRules: [{
+        expiration: cdk.Duration.days(365),
+      }],
+    });
+
+    // DynamoDB Table for Vector Storage (DocumentChunks)
     const vectorsTable = new dynamodb.Table(this, 'SaarthiVectorsTable', {
       tableName: 'saarthi-vectors',
       partitionKey: { name: 'chunk_id', type: dynamodb.AttributeType.STRING },
@@ -59,6 +69,14 @@ export class SaarthiAiStack extends cdk.Stack {
       pointInTimeRecoverySpecification: {
         pointInTimeRecoveryEnabled: true,
       },
+    });
+
+    // DynamoDB table for query cache
+    const queryCacheTable = new dynamodb.Table(this, 'SaarthiQueryCacheTable', {
+      tableName: 'saarthi-query-cache',
+      partitionKey: { name: 'query_hash', type: dynamodb.AttributeType.STRING },
+      billingMode: dynamodb.BillingMode.PAY_PER_REQUEST,
+      removalPolicy: cdk.RemovalPolicy.RETAIN,
     });
 
     // Lambda Execution Role
@@ -85,6 +103,7 @@ export class SaarthiAiStack extends cdk.Stack {
     pdfBucket.grantReadWrite(lambdaRole);
     embeddingsBucket.grantReadWrite(lambdaRole);
     tempAudioBucket.grantReadWrite(lambdaRole);
+    conversationsBucket.grantReadWrite(lambdaRole);
 
     // Grant Textract permissions
     lambdaRole.addToPolicy(new iam.PolicyStatement({
@@ -120,6 +139,7 @@ export class SaarthiAiStack extends cdk.Stack {
 
     // Grant DynamoDB permissions
     vectorsTable.grantReadWriteData(lambdaRole);
+    queryCacheTable.grantReadWriteData(lambdaRole);
 
     // Lambda Functions
     const commonLambdaProps = {
@@ -132,13 +152,15 @@ export class SaarthiAiStack extends cdk.Stack {
         EMBEDDINGS_BUCKET: embeddingsBucket.bucketName,
         TEMP_AUDIO_BUCKET: tempAudioBucket.bucketName,
         DYNAMODB_TABLE: vectorsTable.tableName,
+        CONVERSATIONS_BUCKET: conversationsBucket.bucketName,
+        QUERY_CACHE_TABLE: queryCacheTable.tableName,
         // Optional: override these at deploy-time or in the Lambda console
         // when AWS retires or replaces a specific model version.
         // Recommended defaults for ap-south-1:
         // - Nova Micro via APAC inference profile (Converse API)
-        // - Titan Embeddings V2 (InvokeModel API)
+        // - Titan Embeddings (InvokeModel API)
         TEXT_MODEL_ID: process.env.TEXT_MODEL_ID ?? 'apac.amazon.nova-micro-v1:0',
-        EMBEDDING_MODEL_ID: process.env.EMBEDDING_MODEL_ID ?? 'amazon.titan-embed-text-v2:0',
+        EMBEDDING_MODEL_ID: process.env.EMBEDDING_MODEL_ID ?? 'amazon.titan-embed-text-v1',
       },
       logRetention: logs.RetentionDays.ONE_WEEK,
     };
@@ -245,6 +267,11 @@ export class SaarthiAiStack extends cdk.Stack {
     new cdk.CfnOutput(this, 'DynamoDBTableName', {
       value: vectorsTable.tableName,
       description: 'DynamoDB Table for Vector Storage',
+    });
+
+    new cdk.CfnOutput(this, 'QueryCacheTableName', {
+      value: queryCacheTable.tableName,
+      description: 'DynamoDB Table for Query Cache',
     });
   }
 }

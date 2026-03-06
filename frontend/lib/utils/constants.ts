@@ -7,13 +7,13 @@ export const API_BASE_URL =
   "https://your-api-gateway-url.execute-api.region.amazonaws.com/prod";
 
 export const MAX_FILE_SIZE = 10 * 1024 * 1024; // 10MB
-export const ALLOWED_PDF_TYPES = ["application/pdf"];
-export const ALLOWED_DOCUMENT_TYPES = [
+
+// Allow multiple document types (PDF, Word, text, and common images)
+export const ALLOWED_PDF_TYPES = [
   "application/pdf",
-  "application/vnd.openxmlformats-officedocument.wordprocessingml.document", // .docx
-  "application/msword", // .doc
-  "text/plain",          // .txt
-  "text/html",           // .html
+  "application/msword",
+  "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+  "text/plain",
   "image/png",
   "image/jpeg",
   "image/jpg",

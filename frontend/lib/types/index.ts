@@ -30,10 +30,15 @@ export interface Source {
 
 // PDF Processing Types
 export interface PDFProcessResponse {
-  extracted_text: string;
+  document_type: string;
+  purpose: string;
+  key_points: string[];
+  instructions: string[];
   summary: string;
-  points: string[];
+  extracted_text: string;
   s3_key?: string;
+  document_id?: string;
+  chunk_count?: number;
 }
 
 // Scheme Recommendation Types

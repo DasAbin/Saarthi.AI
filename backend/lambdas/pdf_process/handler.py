@@ -2,25 +2,31 @@
 Lambda handler for PDF processing and analysis.
 
 This handler processes PDF documents using:
-- Amazon Textract for OCR/text extraction
-- Amazon Bedrock (Claude 3 Sonnet) for summarization
+- PyMuPDF (fitz) for local text extraction
+- Amazon Bedrock (Nova/Titan) for summarization
 - Amazon S3 for storage
+- DynamoDB for chunk metadata + embeddings
 """
 
+import base64
 import json
+import logging
 import os
 import sys
-import base64
-import logging
-from typing import Dict, Any
+import uuid
+from typing import Any, Dict
 
 # Add parent directory to path for imports
 sys.path.append(os.path.join(os.path.dirname(__file__), "../.."))
 
-from utils.response import success_response, error_response, lambda_response
-from utils.aws.textract import extract_text_from_pdf
+from utils.response import error_response, lambda_response, success_response
 from utils.s3_client import upload_pdf
-from utils.processing.summarization import generate_summary, extract_key_points
+from utils.document_parser import extract_text as generic_extract_text
+from utils.chunker import chunk_text
+from utils.aws.dynamodb import store_chunk
+from utils.text_cleaner import clean_text
+from services.document_analyzer import analyze_document
+from rag.embedding_service import generate_embedding
 
 # Configure logging
 logger = logging.getLogger()
@@ -104,62 +110,124 @@ def handler(event: Dict[str, Any], context: Any) -> Dict[str, Any]:
             logger.error(f"Failed to upload PDF to S3: {str(e)}")
             # Continue processing even if S3 upload fails
             s3_key = None
-        
-        # Step 2: Extract text using Textract
-        logger.info("Extracting text using Textract...")
+
+        # Derive a stable document identifier
+        document_id = s3_key or f"doc-{uuid.uuid4().hex}"
+
+        # Step 2: Write document to /tmp and extract text using generic parser
+        tmp_dir = "/tmp"
+        os.makedirs(tmp_dir, exist_ok=True)
+
+        # Preserve original extension if available so the parser can detect type
+        _, ext = os.path.splitext(filename)
+        ext = ext or ".bin"
+        tmp_path = os.path.join(tmp_dir, f"{uuid.uuid4().hex}{ext}")
+
         try:
-            extracted_text = extract_text_from_pdf(pdf_bytes)
-            
-            if not extracted_text or len(extracted_text.strip()) < 50:
-                logger.warning("Extracted text is too short")
-                return lambda_response(
-                    400,
-                    error_response("Could not extract sufficient text from PDF. The PDF may be image-only or corrupted.")
-                )
-            
-            logger.info(f"Extracted {len(extracted_text)} characters from PDF")
-            
-        except Exception as e:
-            logger.error(f"Textract error: {str(e)}")
-            return lambda_response(
-                500,
-                error_response(f"Failed to extract text from PDF: {str(e)}")
+            with open(tmp_path, "wb") as f:
+                f.write(pdf_bytes)
+
+            logger.info("Extracting text from document using multi-format parser...")
+            extracted_text = generic_extract_text(tmp_path, filename)
+        finally:
+            # Best-effort cleanup; Lambda /tmp is ephemeral but we keep it tidy
+            try:
+                if os.path.exists(tmp_path):
+                    os.remove(tmp_path)
+            except Exception:
+                pass
+
+        # If very little text was extracted, treat as low-quality OCR.
+        if not extracted_text or len(extracted_text.strip()) < 50:
+            message = (
+                "Document text could not be extracted clearly. "
+                "Please upload a higher quality document."
             )
-        
-        # Step 3: Generate summary using Claude
-        logger.info("Generating summary...")
-        try:
-            summary = generate_summary(extracted_text)
-        except Exception as e:
-            logger.error(f"Summary generation error: {str(e)}")
-            # Fallback: Use first 500 characters as summary
-            summary = extracted_text[:500] + "..." if len(extracted_text) > 500 else extracted_text
-        
-        # Step 4: Extract key points
-        logger.info("Extracting key points...")
-        try:
-            key_points = extract_key_points(extracted_text, max_points=7)
-            # Fallback if extraction fails
-            if not key_points:
-                # Simple fallback: split by sentences and take first few
-                sentences = extracted_text.split(". ")[:5]
-                key_points = [s.strip() + "." for s in sentences if s.strip()]
-        except Exception as e:
-            logger.error(f"Key points extraction error: {str(e)}")
-            key_points = []
-        
-        logger.info("PDF processing completed successfully")
-        
-        # Return results
-        return lambda_response(
-            200,
-            success_response({
-                "extracted_text": extracted_text,
-                "summary": summary,
-                "points": key_points,
-                "s3_key": s3_key
-            })
+            logger.warning(message)
+            return lambda_response(400, error_response(message))
+
+        logger.info("Extracted %d characters from document (raw)", len(extracted_text))
+
+        # Step 3: Clean text (remove OCR noise, merge broken lines, etc.)
+        cleaned_text = clean_text(extracted_text)
+
+        if not cleaned_text or len(cleaned_text.strip()) < 50:
+            message = (
+                "Document text could not be extracted clearly. "
+                "Please upload a higher quality document."
+            )
+            logger.warning(message)
+            return lambda_response(400, error_response(message))
+
+        logger.info(
+            "Cleaned text is %d characters after normalization", len(cleaned_text)
         )
+
+        # Step 4: Chunk cleaned text for embeddings
+        logger.info("Chunking cleaned text for embeddings...")
+        chunks = chunk_text(cleaned_text, chunk_size=800, overlap=100)
+
+        if not chunks:
+            message = (
+                "No text chunks could be generated from the document. It may be empty or unsupported."
+            )
+            logger.warning(message)
+            return lambda_response(
+                400,
+                error_response(message),
+            )
+
+        logger.info("Generated %d chunks", len(chunks))
+
+        # Step 4: Generate embeddings and store chunk metadata in DynamoDB
+        logger.info("Generating embeddings and storing chunks in DynamoDB...")
+        for index, chunk in enumerate(chunks):
+            try:
+                embedding = generate_embedding(chunk)
+                chunk_id = f"{document_id}#chunk-{index}"
+
+                metadata = {
+                    "document_id": document_id,
+                    "chunk_index": index,
+                    "source": filename,
+                }
+
+                store_chunk(
+                    chunk_id=chunk_id,
+                    text=chunk,
+                    embedding=embedding,
+                    metadata=metadata,
+                )
+            except Exception as e:
+                logger.error(
+                    "Failed to store chunk %s for document %s: %s",
+                    index,
+                    document_id,
+                    str(e),
+                )
+                # Continue with other chunks; partial ingestion is better than none
+                continue
+        
+        # Step 5: Structured document analysis via Bedrock
+        logger.info("Analyzing document content with Bedrock...")
+        analysis = analyze_document(cleaned_text)
+
+        logger.info("PDF processing and analysis completed successfully")
+
+        # Return structured results
+        payload = {
+            "document_type": analysis.get("document_type", "Unknown"),
+            "purpose": analysis.get("purpose", ""),
+            "key_points": analysis.get("key_points", []),
+            "instructions": analysis.get("instructions", []),
+            "summary": analysis.get("summary", ""),
+            "extracted_text": cleaned_text,
+            "s3_key": s3_key,
+            "document_id": document_id,
+            "chunk_count": len(chunks),
+        }
+
+        return lambda_response(200, success_response(payload))
         
     except base64.binascii.Error as e:
         logger.error(f"Base64 decode error: {str(e)}")
