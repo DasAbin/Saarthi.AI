@@ -40,8 +40,24 @@ class ApiClient {
       },
     };
 
+    // Support optional timeout via AbortController (in ms)
+    const timeoutMs = (options as any).timeout as number | undefined;
+    const controller = typeof AbortController !== "undefined" ? new AbortController() : undefined;
+    if (controller) {
+      config.signal = controller.signal;
+    }
+
+    let timeoutId: ReturnType<typeof setTimeout> | undefined;
+    if (controller && typeof timeoutMs === "number" && timeoutMs > 0) {
+      timeoutId = setTimeout(() => controller.abort(), timeoutMs);
+    }
+
     try {
       const response = await fetch(url, config);
+
+      if (timeoutId) {
+        clearTimeout(timeoutId);
+      }
 
       if (!response.ok) {
         const errorData = await response.json().catch(() => ({}));

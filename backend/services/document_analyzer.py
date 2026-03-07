@@ -76,8 +76,9 @@ def analyze_document(text: str) -> Dict[str, Any]:
     prompt = _build_prompt(text)
 
     try:
+        # Keep analysis latency low: limit max_tokens so we stay under API Gateway limits
         logger.info("Invoking Bedrock for document analysis (text length=%d)", len(text))
-        raw = invoke_claude(prompt, system_prompt=SYSTEM_PROMPT, max_tokens=2048)
+        raw = invoke_claude(prompt, system_prompt=SYSTEM_PROMPT, max_tokens=1024)
         logger.debug("Raw document analysis response: %s", raw[:500])
 
         try:

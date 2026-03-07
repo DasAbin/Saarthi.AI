@@ -160,7 +160,7 @@ export class SaarthiAiStack extends cdk.Stack {
         // - Nova Micro via APAC inference profile (Converse API)
         // - Titan Embeddings (InvokeModel API)
         TEXT_MODEL_ID: process.env.TEXT_MODEL_ID ?? 'apac.amazon.nova-micro-v1:0',
-        EMBEDDING_MODEL_ID: process.env.EMBEDDING_MODEL_ID ?? 'amazon.titan-embed-text-v1',
+        EMBEDDING_MODEL_ID: process.env.EMBEDDING_MODEL_ID ?? 'amazon.titan-embed-text-v2:0',
       },
       logRetention: logs.RetentionDays.ONE_WEEK,
     };
@@ -176,7 +176,7 @@ export class SaarthiAiStack extends cdk.Stack {
 
     const pdfProcessLambda = new lambda.Function(this, 'PdfProcessLambda', {
       ...commonLambdaProps,
-      functionName: 'saarthi-pdf-process',
+      functionName: 'saarthi-document-process',
       code: lambda.Code.fromAsset('../backend'),
       handler: 'lambdas/pdf_process/handler.handler',
       memorySize: 2048, // More memory for PDF processing
@@ -212,6 +212,14 @@ export class SaarthiAiStack extends cdk.Stack {
       handler: 'lambdas/grievance_handler/handler.handler',
     });
 
+    const uploadUrlLambda = new lambda.Function(this, 'UploadUrlLambda', {
+      ...commonLambdaProps,
+      functionName: 'saarthi-upload-url',
+      code: lambda.Code.fromAsset('../backend'),
+      handler: 'lambdas/upload_url/handler.handler',
+      memorySize: 256,
+    });
+
     const healthLambda = new lambda.Function(this, 'HealthLambda', {
       ...commonLambdaProps,
       functionName: 'saarthi-health',
@@ -235,6 +243,7 @@ export class SaarthiAiStack extends cdk.Stack {
     // API Gateway Integrations
     const queryIntegration = new apigateway.LambdaIntegration(ragQueryLambda);
     const pdfIntegration = new apigateway.LambdaIntegration(pdfProcessLambda);
+    const uploadUrlIntegration = new apigateway.LambdaIntegration(uploadUrlLambda);
     const recommendIntegration = new apigateway.LambdaIntegration(recommendSchemesLambda);
     const sttIntegration = new apigateway.LambdaIntegration(sttHandlerLambda);
     const ttsIntegration = new apigateway.LambdaIntegration(ttsHandlerLambda);
@@ -244,7 +253,13 @@ export class SaarthiAiStack extends cdk.Stack {
     // API Routes
     api.root.addResource('health').addMethod('GET', healthIntegration);
     api.root.addResource('query').addMethod('POST', queryIntegration);
-    api.root.addResource('pdf').addMethod('POST', pdfIntegration);
+
+    // Document processing routes
+    const pdfResource = api.root.addResource('pdf');
+    pdfResource.addMethod('POST', pdfIntegration);
+
+    // New upload-url route for presigned S3 uploads
+    api.root.addResource('upload-url').addMethod('POST', uploadUrlIntegration);
     api.root.addResource('recommend').addMethod('POST', recommendIntegration);
     
     const voiceResource = api.root.addResource('voice');

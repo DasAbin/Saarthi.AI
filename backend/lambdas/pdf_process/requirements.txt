@@ -1,4 +1,10 @@
 boto3>=1.34.0
 botocore>=1.34.0
-pymupdf>=1.24.0
 numpy>=1.26.0
+python-docx
+beautifulsoup4
+openpyxl
+xlrd
+python-pptx
+striprtf
+odfpy

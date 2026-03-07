@@ -24,20 +24,20 @@ export default function PDFPage() {
     if (!selectedFile) return;
 
     if (!ALLOWED_PDF_TYPES.includes(selectedFile.type)) {
-      setError("Please select a PDF file");
+      setError("Please select a supported document format");
       toast({
         title: "Invalid file",
-        description: "Please select a PDF file",
+        description: "Supported formats: PDF, Word, Excel, PowerPoint, CSV, RTF, ODT, Markdown, HTML, Text, Images",
         variant: "destructive",
       });
       return;
     }
 
     if (selectedFile.size > MAX_FILE_SIZE) {
-      setError("File size must be less than 10MB");
+      setError("File size must be less than 50MB");
       toast({
         title: "File too large",
-        description: "File size must be less than 10MB",
+        description: "File size must be less than 50MB",
         variant: "destructive",
       });
       return;
@@ -89,7 +89,7 @@ export default function PDFPage() {
         <div className="mb-8">
           <h1 className="text-3xl font-bold mb-2">Document Analyzer</h1>
           <p className="text-muted-foreground">
-            Upload government policy documents (PDF, Word, images) and get instant summaries
+            Upload documents (PDF, Word, Excel, PowerPoint, CSV, RTF, ODT, Markdown, HTML, Text, Images) and get instant analysis
           </p>
         </div>
 
@@ -100,7 +100,7 @@ export default function PDFPage() {
                 <input
                   ref={fileInputRef}
                   type="file"
-                  accept=".pdf,.doc,.docx,.txt,image/*"
+                  accept=".pdf,.doc,.docx,.txt,.xlsx,.xls,.pptx,.ppt,.csv,.rtf,.odt,.md,.html,.htm,image/*"
                   onChange={handleFileChange}
                   className="hidden"
                 />
@@ -128,12 +128,12 @@ export default function PDFPage() {
                   {loading ? (
                     <>
                       <Loader2 className="mr-2 h-4 w-4 animate-spin" />
-                      Processing...
+                      Processing document... This may take up to 2 minutes.
                     </>
                   ) : (
                     <>
                       <FileText className="mr-2 h-4 w-4" />
-                      Analyze PDF
+                      Analyze Document
                     </>
                   )}
                 </Button>
@@ -145,8 +145,12 @@ export default function PDFPage() {
         {error && <ErrorMessage message={error} className="mb-6" />}
 
         {loading && (
-          <div className="flex justify-center py-8">
+          <div className="flex flex-col items-center py-8 space-y-2">
             <LoadingSpinner size="lg" />
+            <p className="text-sm text-muted-foreground text-center max-w-md">
+              Processing document with Amazon Textract. This can take up to 2 minutes
+              for large or complex PDFs. Please do not close this tab.
+            </p>
           </div>
         )}
 

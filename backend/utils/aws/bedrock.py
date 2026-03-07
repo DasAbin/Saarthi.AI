@@ -48,29 +48,37 @@ def get_embedding(text: str) -> List[float]:
     try:
         if not text or not text.strip():
             raise ValueError("Text cannot be empty")
-        
+
+        logger.info(
+            "Requesting Titan embedding with modelId=%s for text length=%d",
+            TITAN_EMBEDDING_MODEL_ID,
+            len(text),
+        )
+
         body = json.dumps({"inputText": text})
-        
+
         response = bedrock_runtime.invoke_model(
             modelId=TITAN_EMBEDDING_MODEL_ID,
             body=body,
             contentType="application/json",
             accept="application/json"
         )
-        
+
         response_body = json.loads(response["body"].read())
-        
+
         if "embedding" not in response_body:
             raise ValueError("No embedding in response")
-        
+
         embedding = response_body["embedding"]
-        
+
+        logger.info("Generated embedding vector of length %d", len(embedding))
+
         if EMBEDDING_DIMENSION and len(embedding) != EMBEDDING_DIMENSION:
             logger.warning(
                 f"Unexpected embedding dimension: {len(embedding)}, expected {EMBEDDING_DIMENSION}. "
                 "This may be fine if your embedding model/config uses a different vector size."
             )
-        
+
         return embedding
         
     except ClientError as e:
@@ -97,17 +105,24 @@ def get_embeddings_batch(texts: List[str]) -> List[List[float]]:
     Returns:
         List of embedding vectors
     """
-    embeddings = []
+    embeddings: List[List[float]] = []
     for i, text in enumerate(texts):
         try:
             embedding = get_embedding(text)
             embeddings.append(embedding)
+            logger.info(
+                "Generated embedding for batch item %d (length=%d)",
+                i,
+                len(text or ""),
+            )
             if (i + 1) % 10 == 0:
-                logger.info(f"Processed {i + 1}/{len(texts)} embeddings")
+                logger.info("Processed %d/%d embeddings", i + 1, len(texts))
         except Exception as e:
-            logger.error(f"Failed to embed text {i}: {str(e)}")
-            raise
-    
+            logger.error("Failed to embed text %d: %s", i, str(e))
+            # Append empty embedding placeholder and continue
+            embeddings.append([])
+            continue
+
     return embeddings
 
 

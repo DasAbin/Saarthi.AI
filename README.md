@@ -14,27 +14,48 @@ A production-ready, full-stack AI application that provides multilingual civic i
 ## 🏗️ Architecture
 
 ```
-Frontend (Next.js 14 / Amplify Hosting)
-    ↓
-API Gateway
-    ↓
-Lambda Functions:
-    - rag_query (RAG-based Q&A)
-    - pdf_process (PDF OCR & analysis)
-    - recommend_schemes (Scheme matching)
-    - stt_handler (Speech-to-text)
-    - tts_handler (Text-to-speech)
-    - grievance_handler (Complaint generation)
-    ↓
-AWS Services:
-    - Amazon Bedrock (Claude 3 Sonnet + Titan Embeddings)
-    - OpenSearch Serverless (Vector DB)
-    - S3 (PDFs + embeddings)
-    - Textract (PDF OCR)
-    - Transcribe (STT)
-    - Polly (TTS)
-    - CloudWatch (Logging)
+┌─────────────────────────────────────────────────────────────┐
+│                      Frontend Layer                         │
+│  Next.js 14 - React, TypeScript, TailwindCSS, ShadCN UI    │
+└───────────────────────┬─────────────────────────────────────┘
+                        │ HTTPS
+                        ↓
+┌─────────────────────────────────────────────────────────────┐
+│                    API Gateway Layer                        │
+│  REST API Gateway - Request Routing, CORS, Rate Limiting   │
+└───────────────────────┬─────────────────────────────────────┘
+                        │
+        ┌───────────────┼───────────────┐
+        ↓               ↓               ↓
+┌──────────────┐ ┌──────────────┐ ┌──────────────┐
+│ Lambda: RAG  │ │ Lambda: PDF  │ │ Lambda: STT  │
+│   Query      │ │   Process    │ │   Handler    │
+└──────┬───────┘ └──────┬───────┘ └──────┬───────┘
+       │                 │                 │
+       ↓                 ↓                 ↓
+┌─────────────────────────────────────────────────────────────┐
+│                    AWS AI Services                          │
+│  Bedrock (Nova Micro + Titan) | Textract | Transcribe | Polly│
+└───────────────────────┬─────────────────────────────────────┘
+                        │
+        ┌───────────────┼───────────────┐
+        ↓               ↓               ↓
+┌──────────────┐ ┌──────────────┐ ┌──────────────┐
+│  DynamoDB    │ │     S3       │ │  CloudWatch  │
+│  (Vectors +  │ │  (Documents) │ │   (Logs)     │
+│   Cache)     │ │              │ │              │
+└──────────────┘ └──────────────┘ └──────────────┘
 ```
+
+**Lambda Functions:**
+- `rag_query` - RAG-based Q&A with Bedrock + DynamoDB vector search
+- `pdf_process` - Document processing with Textract + Bedrock analysis
+- `recommend_schemes` - AI-powered scheme matching
+- `stt_handler` - Speech-to-text with Transcribe
+- `tts_handler` - Text-to-speech with Polly
+- `grievance_handler` - Complaint letter generation
+- `upload_url` - S3 presigned URL generation
+- `health` - Health check endpoint
 
 ## 📁 Project Structure
 
@@ -103,8 +124,6 @@ cdk deploy
 # Or use: ./scripts/deploy-frontend.sh
 ```
 
-📖 **Full deployment guide:** [docs/DEPLOYMENT_GUIDE.md](./docs/DEPLOYMENT_GUIDE.md)  
-⚡ **Quick deploy:** [docs/QUICK_DEPLOY.md](./docs/QUICK_DEPLOY.md)
 
 ## 🚀 Deployment
 
@@ -115,9 +134,36 @@ cdk deploy
 - AWS CLI configured
 - AWS CDK installed (`npm install -g aws-cdk`)
 - **⚠️ Bedrock model access requested** (Claude + Titan)
+- **⚠️ AWS Textract service activated** (for document processing)
 
-**📖 Quick start:** [START_HERE.md](./START_HERE.md)  
-**📚 Complete guide:** [HOW_TO_RUN.md](./HOW_TO_RUN.md)
+### ⚠️ MANUAL STEPS REQUIRED
+
+**Before deploying, you must complete these steps manually:**
+
+#### 1. Verify AWS Textract Service (CRITICAL)
+- Go to AWS Console → Amazon Textract
+- Region: `ap-south-1` (Mumbai)
+- Verify service is available (not "Activating" or "Subscription Required")
+- If not activated, contact AWS Support or wait for activation
+- **DO NOT DEPLOY until Textract is available**
+
+#### 2. Deploy Infrastructure
+```powershell
+cd infra
+npm install
+npx cdk bootstrap  # First time only
+npx cdk deploy --require-approval never
+```
+
+#### 3. Verify IAM Permissions (After Deployment)
+- Go to Lambda Console → `saarthi-document-process` → Configuration → Permissions
+- Verify IAM role has `textract:DetectDocumentText` permission
+- If missing, check CDK stack output or manually add permission
+
+#### 4. Test Document Processing
+- Upload a PDF via frontend Document Analyzer
+- Check CloudWatch logs: `/aws/lambda/saarthi-document-process`
+- Look for "Textract extraction completed" messages
 
 ### Frontend Setup
 
@@ -142,21 +188,7 @@ pip install -r requirements.txt -t .
 python -m pytest tests/  # If tests exist
 ```
 
-### Infrastructure Deployment
-
-```bash
-# Install CDK dependencies
-cd infra
-npm install
-
-# Bootstrap CDK (first time only)
-cdk bootstrap
-
-# Deploy stack
-cdk deploy
-```
-
-After deployment, update `frontend/lib/api.ts` with the API Gateway URL.
+After deployment, update `frontend/lib/utils/constants.ts` with the API Gateway URL.
 
 ## 🔧 Configuration
 
@@ -168,27 +200,44 @@ NEXT_PUBLIC_API_GATEWAY_URL=https://your-api-gateway-url.execute-api.region.amaz
 ```
 
 **Backend** (Set in CDK stack):
-- `AWS_REGION`
-- `PDF_BUCKET`
-- `EMBEDDINGS_BUCKET`
-- `TEMP_AUDIO_BUCKET`
-- `OPENSEARCH_ENDPOINT`
-- `OPENSEARCH_INDEX`
-- `OPENSEARCH_COLLECTION`
+- `AWS_REGION` (default: `ap-south-1`)
+- `PDF_BUCKET` (S3 bucket for documents)
+- `EMBEDDINGS_BUCKET` (S3 bucket for embeddings)
+- `TEMP_AUDIO_BUCKET` (S3 bucket for temporary audio files)
+- `DYNAMODB_TABLE` (DynamoDB table for vector storage)
+- `QUERY_CACHE_TABLE` (DynamoDB table for query cache)
+- `CONVERSATIONS_BUCKET` (S3 bucket for conversation logs)
+- `TEXT_MODEL_ID` (Bedrock model, default: `apac.amazon.nova-micro-v1:0`)
+- `EMBEDDING_MODEL_ID` (Bedrock model, default: `amazon.titan-embed-text-v1`)
+
+## 📝 Supported Document Formats
+
+**Textract (PDFs & Images):**
+- PDF (digital and scanned)
+- Images: PNG, JPEG, TIFF
+
+**Generic Extractors (Other Formats):**
+- Word: DOCX, DOC
+- Excel: XLSX, XLS
+- PowerPoint: PPTX, PPT
+- Text: TXT, CSV, MD, HTML, RTF
+- OpenDocument: ODT
+- Images: PNG, JPEG, BMP, TIFF, WebP, GIF, SVG
 
 ## 📡 API Endpoints
 
-See `docs/openapi.yaml` for complete API documentation.
-
 ### Key Endpoints:
 
-- `POST /query` - RAG-based Q&A
-- `POST /pdf` - PDF processing
-- `POST /recommend` - Scheme recommendations
-- `POST /voice/stt` - Speech-to-text
-- `POST /voice/tts` - Text-to-speech
-- `POST /grievance` - Generate complaint letter
-- `GET /health` - Health check
+- `POST /query` - RAG-based Q&A (supports Hindi/English/Marathi)
+- `POST /pdf` - Document processing (PDF, Word, Excel, images, etc.)
+- `POST /upload-url` - Generate S3 presigned URL for file uploads
+- `POST /recommend` - Scheme recommendations based on user profile
+- `POST /voice/stt` - Speech-to-text conversion
+- `POST /voice/tts` - Text-to-speech synthesis
+- `POST /grievance` - Generate formal complaint letters
+- `GET /health` - Health check endpoint
+
+See `docs/openapi.yaml` for complete API documentation.
 
 ## 🛠️ Development
 

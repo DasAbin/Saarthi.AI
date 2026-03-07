@@ -16,7 +16,7 @@ bedrock_runtime = boto3.client(
 
 # Model IDs
 CLAUDE_MODEL_ID = "anthropic.claude-3-sonnet-20240229-v1:0"
-TITAN_EMBEDDING_MODEL_ID = "amazon.titan-embed-text-v1"
+TITAN_EMBEDDING_MODEL_ID = "amazon.titan-embed-text-v2:0"
 
 
 def get_embedding(text: str) -> List[float]:

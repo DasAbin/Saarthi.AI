@@ -13,6 +13,7 @@ import { Button } from "@/components/ui/button";
 import { Card, CardContent } from "@/components/ui/card";
 import { processPDF } from "@/lib/api/pdf";
 import type { PDFProcessResponse } from "@/lib/types";
+import { ALLOWED_PDF_TYPES } from "@/lib/utils/constants";
 import { useToast } from "@/components/ui/use-toast";
 
 export default function PDFAnalyzer() {
@@ -24,11 +25,7 @@ export default function PDFAnalyzer() {
 
   const handleFileChange = (e: React.ChangeEvent<HTMLInputElement>) => {
     const selectedFile = e.target.files?.[0];
-    if (
-      selectedFile &&
-      (selectedFile.type === "application/pdf" ||
-        selectedFile.type.startsWith("image/"))
-    ) {
+    if (selectedFile && ALLOWED_PDF_TYPES.includes(selectedFile.type)) {
       setFile(selectedFile);
       setResult(null);
     } else {
@@ -81,7 +78,7 @@ export default function PDFAnalyzer() {
               <input
                 ref={fileInputRef}
                 type="file"
-                accept=".pdf,image/*"
+                accept=".pdf,.doc,.docx,.txt,.xlsx,.xls,.pptx,.ppt,.csv,.rtf,.odt,.md,.html,.htm,image/*"
                 onChange={handleFileChange}
                 className="hidden"
               />
@@ -107,12 +104,12 @@ export default function PDFAnalyzer() {
                 {loading ? (
                   <>
                     <Loader2 className="mr-2 h-4 w-4 animate-spin" />
-                    Processing...
+                    Processing document... This may take up to 2 minutes.
                   </>
                 ) : (
                   <>
                     <FileText className="mr-2 h-4 w-4" />
-                    Analyze PDF
+                    Analyze Document
                   </>
                 )}
               </Button>

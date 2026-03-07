@@ -13,7 +13,8 @@ logger = logging.getLogger()
 logger.setLevel(logging.INFO)
 
 # Initialize Textract client
-textract_client = boto3.client("textract", region_name=os.getenv("AWS_REGION", "us-east-1"))
+# Use the same region as the Lambda (ap-south-1)
+textract_client = boto3.client("textract", region_name=os.getenv("AWS_REGION", os.getenv("AWS_DEFAULT_REGION", "ap-south-1")))
 
 
 def extract_text_from_pdf(pdf_bytes: bytes) -> str:

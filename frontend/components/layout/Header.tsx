@@ -21,7 +21,7 @@ export function Header() {
           </Link>
           <Link href="/pdf">
             <Button variant="ghost" size="sm">
-              PDF
+              Documents
             </Button>
           </Link>
           <Link href="/voice">
