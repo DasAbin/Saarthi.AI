@@ -59,7 +59,7 @@ def handler(event: Dict[str, Any], context: Any) -> Dict[str, Any]:
     try:
         logger.info("Document process handler invoked")
         
-       # Parse JSON body
+        # Parse JSON body
         body = event.get("body") or "{}"
         if isinstance(body, str):
             try:

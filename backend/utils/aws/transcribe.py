@@ -10,6 +10,7 @@ import uuid
 import time
 import logging
 import json
+import urllib.request
 from typing import Optional
 from botocore.exceptions import ClientError
 
@@ -64,7 +65,7 @@ def transcribe_audio(audio_bytes: bytes, language_code: str = "en-US") -> str:
         if not audio_bytes or len(audio_bytes) < 100:
             raise ValueError("Audio file is too small or empty")
         
-        # Detect audio format
+        # Detect audio format (still used for S3 content-type and key)
         audio_format = detect_audio_format(audio_bytes)
         logger.info(f"Detected audio format: {audio_format}")
         
@@ -87,17 +88,23 @@ def transcribe_audio(audio_bytes: bytes, language_code: str = "en-US") -> str:
         
         # Start transcription job
         media_uri = f"s3://{TEMP_AUDIO_BUCKET}/{audio_key}"
+        audio_uri = media_uri
         logger.info(f"Starting Transcribe job: {job_name} (language: {language_code})")
-        
+        print("Starting transcription:", job_name)
+        print("Language:", language_code)
+        print("Audio URI:", audio_uri)
+
         try:
+            # Use the detected audio format so Transcribe receives a matching MediaFormat.
             transcribe_client.start_transcription_job(
                 TranscriptionJobName=job_name,
-                Media={"MediaFileUri": media_uri},
-                MediaFormat=audio_format,
                 LanguageCode=language_code,
+                Media={
+                    "MediaFileUri": media_uri
+                },
+                MediaFormat=audio_format,
                 Settings={
-                    "ShowSpeakerLabels": False,
-                    "MaxAlternatives": 1
+                    "ShowSpeakerLabels": False
                 }
             )
         except ClientError as e:
@@ -107,7 +114,8 @@ def transcribe_audio(audio_bytes: bytes, language_code: str = "en-US") -> str:
                 job_name = f"transcribe-{uuid.uuid4().hex[:16]}"
                 audio_key = f"audio/{job_name}.{audio_format}"
                 media_uri = f"s3://{TEMP_AUDIO_BUCKET}/{audio_key}"
-                
+                audio_uri = media_uri
+
                 # Re-upload with new key
                 s3_client.put_object(
                     Bucket=TEMP_AUDIO_BUCKET,
@@ -115,12 +123,21 @@ def transcribe_audio(audio_bytes: bytes, language_code: str = "en-US") -> str:
                     Body=audio_bytes,
                     ContentType=f"audio/{audio_format}"
                 )
-                
+
+                print("Starting transcription:", job_name)
+                print("Language:", language_code)
+                print("Audio URI:", audio_uri)
+
                 transcribe_client.start_transcription_job(
                     TranscriptionJobName=job_name,
-                    Media={"MediaFileUri": media_uri},
+                    LanguageCode=language_code,
+                    Media={
+                        "MediaFileUri": media_uri
+                    },
                     MediaFormat=audio_format,
-                    LanguageCode=language_code
+                    Settings={
+                        "ShowSpeakerLabels": False
+                    }
                 )
             else:
                 raise
@@ -139,11 +156,9 @@ def transcribe_audio(audio_bytes: bytes, language_code: str = "en-US") -> str:
                     transcript_uri = response["TranscriptionJob"]["Transcript"]["TranscriptFileUri"]
                     logger.info(f"Transcription completed. Fetching transcript from: {transcript_uri}")
                     
-                    # Download transcript
-                    import requests
-                    transcript_response = requests.get(transcript_uri, timeout=10)
-                    transcript_response.raise_for_status()
-                    transcript_data = transcript_response.json()
+                    # Download transcript using stdlib urllib (requests is not in Lambda)
+                    with urllib.request.urlopen(transcript_uri, timeout=10) as resp:
+                        transcript_data = json.loads(resp.read().decode("utf-8"))
                     
                     # Extract text
                     transcript_text = transcript_data["results"]["transcripts"][0]["transcript"]

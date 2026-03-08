@@ -1,7 +1,10 @@
 "use client";
 
-import { useState } from "react";
+import { Suspense, useState, useRef, useEffect } from "react";
+import { useSearchParams } from "next/navigation";
 import { Send, Loader2, FileText, CheckCircle2 } from "lucide-react";
+import ReactMarkdown from "react-markdown";
+import remarkGfm from "remark-gfm";
 import { Button } from "@/components/ui/button";
 import { Textarea } from "@/components/ui/textarea";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
@@ -10,27 +13,68 @@ import { LoadingSpinner } from "@/components/common/LoadingSpinner";
 import { ErrorMessage } from "@/components/common/ErrorMessage";
 import { queryAI } from "@/lib/api/query";
 import { useToast } from "@/components/ui/use-toast";
-import type { Language, QueryResponse } from "@/lib/types";
+import type { Language, QueryResponse, ChatHistoryItem } from "@/lib/types";
 
-export default function ChatPage() {
-  const [query, setQuery] = useState("");
+type ChatMessage = {
+  role: "user" | "assistant";
+  content: string;
+  sources?: QueryResponse["sources"];
+  confidence?: number;
+};
+
+function ChatContent() {
+  const [input, setInput] = useState("");
   const [language, setLanguage] = useState<Language>("en");
   const [loading, setLoading] = useState(false);
-  const [response, setResponse] = useState<QueryResponse | null>(null);
+  const [messages, setMessages] = useState<ChatMessage[]>([]);
   const [error, setError] = useState<string | null>(null);
+  const messagesEndRef = useRef<HTMLDivElement | null>(null);
   const { toast } = useToast();
+  const params = useSearchParams();
+  const docId = params.get("docId") || undefined;
+
+  useEffect(() => {
+    messagesEndRef.current?.scrollIntoView({ behavior: "smooth" });
+  }, [messages]);
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (!query.trim()) return;
+    if (!input.trim()) return;
 
     setLoading(true);
-    setResponse(null);
     setError(null);
 
     try {
-      const result = await queryAI({ query, language });
-      setResponse(result);
+      const userMessage: ChatMessage = {
+        role: "user",
+        content: input,
+      };
+
+      const nextMessages = [...messages, userMessage];
+      setMessages(nextMessages);
+      const history: ChatHistoryItem[] = nextMessages.map((m) => ({
+        role: m.role,
+        content: m.content,
+      }));
+
+      const currentInput = input;
+      setInput("");
+
+      const result: QueryResponse = await queryAI({
+        query: currentInput,
+        language,
+        docId,
+        history,
+      });
+
+      const aiMessage: ChatMessage = {
+        role: "assistant",
+        content: result.answer,
+        sources: result.sources,
+        confidence: result.confidence,
+      };
+
+      setMessages((prev) => [...prev, aiMessage]);
     } catch (err) {
       const errorMessage =
         err instanceof Error ? err.message : "Failed to get response";
@@ -63,15 +107,15 @@ export default function ChatPage() {
               language === "hi"
                 ? "सरकारी योजनाओं के बारे में पूछें..."
                 : language === "mr"
-                ? "सरकारी योजनांबद्दल विचारा..."
-                : "Ask about government schemes..."
+                  ? "सरकारी योजनांबद्दल विचारा..."
+                  : "Ask about government schemes..."
             }
-            value={query}
-            onChange={(e) => setQuery(e.target.value)}
+            value={input}
+            onChange={(e) => setInput(e.target.value)}
             className="min-h-[120px]"
             disabled={loading}
           />
-          <Button type="submit" disabled={loading || !query.trim()}>
+          <Button type="submit" disabled={loading || !input.trim()}>
             {loading ? (
               <>
                 <Loader2 className="mr-2 h-4 w-4 animate-spin" />
@@ -94,60 +138,67 @@ export default function ChatPage() {
           </div>
         )}
 
-        {response && (
-          <div className="space-y-4">
-            <Card>
-              <CardHeader>
-                <CardTitle>Answer</CardTitle>
-              </CardHeader>
-              <CardContent>
-                <p className="text-slate-700 whitespace-pre-wrap">
-                  {response.answer}
-                </p>
-                {response.confidence && (
-                  <div className="flex items-center gap-2 mt-4 text-sm text-muted-foreground">
-                    <CheckCircle2 className="h-4 w-4" />
-                    <span>
-                      Confidence: {(response.confidence * 100).toFixed(1)}%
-                    </span>
+        {messages.length > 0 && (
+          <div className="max-h-[500px] overflow-y-auto p-4 mt-6">
+            <div className="flex flex-col gap-4 mt-6">
+              {messages.map((msg, i) => (
+                <div
+                  key={i}
+                  className={
+                    msg.role === "user"
+                      ? "bg-blue-100 rounded-xl p-4 ml-auto max-w-2xl shadow-sm"
+                      : "bg-gray-100 rounded-xl p-4 max-w-2xl shadow-sm"
+                  }
+                >
+                  <div className="text-sm font-medium mb-1">
+                    {msg.role === "user" ? "You" : "AI Assistant"}
                   </div>
-                )}
-              </CardContent>
-            </Card>
-
-            {response.sources && response.sources.length > 0 && (
-              <Card>
-                <CardHeader>
-                  <CardTitle>Sources</CardTitle>
-                </CardHeader>
-                <CardContent>
-                  <div className="space-y-3">
-                    {response.sources.map((source, idx) => (
-                      <Card key={idx} className="bg-muted/50">
-                        <CardContent className="pt-4">
-                          <div className="flex items-start gap-2">
-                            <FileText className="h-4 w-4 mt-0.5 text-muted-foreground flex-shrink-0" />
-                            <div className="flex-1">
-                              <p className="text-sm text-foreground">
-                                {source.text}
-                              </p>
-                              <div className="mt-2 flex gap-4 text-xs text-muted-foreground">
-                                <span>{source.source}</span>
-                                {source.page && <span>Page {source.page}</span>}
-                                <span>Score: {(source.score * 100).toFixed(1)}%</span>
-                              </div>
-                            </div>
-                          </div>
-                        </CardContent>
-                      </Card>
-                    ))}
+                  <div className="text-sm whitespace-pre-wrap">
+                    {msg.role === "assistant" ? (
+                      <ReactMarkdown
+                        remarkPlugins={[remarkGfm]}
+                        components={{
+                          h1: ({ ...props }) => (
+                            <h1 className="text-xl font-bold mb-2" {...props} />
+                          ),
+                          h2: ({ ...props }) => (
+                            <h2 className="text-lg font-semibold mb-2" {...props} />
+                          ),
+                          h3: ({ ...props }) => (
+                            <h3 className="font-semibold mb-1" {...props} />
+                          ),
+                          strong: ({ ...props }) => (
+                            <strong className="font-semibold" {...props} />
+                          ),
+                          ul: ({ ...props }) => (
+                            <ul className="list-disc ml-6" {...props} />
+                          ),
+                          li: ({ ...props }) => (
+                            <li className="mb-1" {...props} />
+                          ),
+                        }}
+                      >
+                        {msg.content}
+                      </ReactMarkdown>
+                    ) : (
+                      msg.content
+                    )}
                   </div>
-                </CardContent>
-              </Card>
-            )}
+                </div>
+              ))}
+              <div ref={messagesEndRef} />
+            </div>
           </div>
         )}
       </div>
     </div>
+  );
+}
+
+export default function ChatPage() {
+  return (
+    <Suspense fallback={<div className="container py-8"><p className="text-muted-foreground">Loading...</p></div>}>
+      <ChatContent />
+    </Suspense>
   );
 }

@@ -16,7 +16,7 @@ from typing import Dict, Any
 # Add parent directory to path for imports
 sys.path.append(os.path.join(os.path.dirname(__file__), "../.."))
 
-from utils.response import success_response, error_response, lambda_response
+from utils.response import lambda_response
 from utils.aws.transcribe import transcribe_audio
 
 # Configure logging
@@ -43,33 +43,35 @@ def handler(event: Dict[str, Any], context: Any) -> Dict[str, Any]:
     try:
         logger.info("STT handler invoked")
         
-        # Parse audio from request
+        # ── Parse request body ──────────────────────────────────────────
+        # New flow: frontend sends JSON { "audio": "<base64>", "language": "en" }
+        # Legacy flow: raw binary multipart (isBase64Encoded=True)
         audio_bytes = None
         body = {}
-        
-        if event.get("isBase64Encoded"):
-            audio_bytes = base64.b64decode(event["body"])
-        elif isinstance(event.get("body"), str):
+
+        raw_body = event.get("body") or ""
+
+        # Try JSON parse first (preferred path)
+        if isinstance(raw_body, str) and raw_body.strip().startswith("{"):
             try:
-                body = json.loads(event["body"])
-                if "audio" in body:
-                    audio_bytes = base64.b64decode(body["audio"])
-                else:
-                    audio_bytes = base64.b64decode(event["body"])
-            except (json.JSONDecodeError, ValueError):
-                return lambda_response(
-                    400,
-                    error_response("Invalid audio format")
-                )
-        else:
-            body = event.get("body", {})
-            if isinstance(body, dict) and "audio" in body:
+                body = json.loads(raw_body)
+            except json.JSONDecodeError:
+                pass
+
+        if isinstance(body, dict) and "audio" in body:
+            # JSON body with base64 audio field (new frontend flow)
+            try:
                 audio_bytes = base64.b64decode(body["audio"])
-            else:
-                return lambda_response(
-                    400,
-                    error_response("Audio file is required")
-                )
+            except Exception:
+                return lambda_response(400, {"success": False, "error": "Invalid base64 audio data"})
+        elif event.get("isBase64Encoded") and raw_body:
+            # Legacy: API Gateway passed raw binary body as base64
+            try:
+                audio_bytes = base64.b64decode(raw_body)
+            except Exception:
+                return lambda_response(400, {"success": False, "error": "Invalid base64 encoded body"})
+        else:
+            return lambda_response(400, {"success": False, "error": "Audio file is required"})
         
         if not audio_bytes:
             return lambda_response(
@@ -79,63 +81,58 @@ def handler(event: Dict[str, Any], context: Any) -> Dict[str, Any]:
         
         logger.info(f"Audio received: {len(audio_bytes)} bytes")
         
-        # Get language code from headers or body
-        headers = event.get("headers", {})
-        language_code = (
-            headers.get("x-language-code") or
-            headers.get("X-Language-Code") or
-            (body.get("language") if isinstance(body, dict) else None) or
-            "en-US"
-        )
-        
-        # Map language codes
-        language_map = {
-            "en": "en-US",
-            "hi": "hi-IN",
-            "mr": "mr-IN",
-        }
-        
-        if language_code in language_map:
-            language_code = language_map[language_code]
-        
+        # Get language from request and map to AWS Transcribe language code
+        headers = event.get("headers", {}) or {}
+
+        language = None
+        if isinstance(body, dict):
+            language = body.get("language")
+
+        if not language:
+            language = headers.get("x-language-code") or headers.get("X-Language-Code")
+
+        if language == "hi":
+            language_code = "hi-IN"
+        elif language == "mr":
+            language_code = "mr-IN"
+        else:
+            language_code = "en-IN"
+
         logger.info(f"Processing audio with language: {language_code}")
         
-        # Transcribe audio
+        # Transcribe audio with safe fallback
         try:
             transcript = transcribe_audio(audio_bytes, language_code)
-            
-            if not transcript or not transcript.strip():
-                logger.warning("Empty transcript received")
-                return lambda_response(
-                    400,
-                    error_response("Could not transcribe audio. Please ensure the audio contains clear speech.")
-                )
-            
-            logger.info(f"Transcription successful: {len(transcript)} characters")
-            
+        except Exception as e:
+            logger.error(f"Transcription error: {str(e)}", exc_info=True)
             return lambda_response(
                 200,
-                success_response({
-                    "text": transcript
-                })
+                {
+                    "success": False,
+                    "error": "Speech recognition failed"
+                }
             )
-            
-        except Exception as e:
-            logger.error(f"Transcription error: {str(e)}")
-            error_message = str(e)
-            
-            # Provide user-friendly error messages
-            if "access denied" in error_message.lower():
-                error_message = "Transcribe access denied. Please check IAM permissions."
-            elif "timeout" in error_message.lower():
-                error_message = "Transcription timed out. Please try with a shorter audio clip."
-            elif "language" in error_message.lower():
-                error_message = f"Unsupported language: {language_code}. Please use en-US, hi-IN, or mr-IN."
-            
+
+        if not transcript or not transcript.strip():
+            logger.warning("Empty transcript received")
             return lambda_response(
-                500,
-                error_response(f"Failed to transcribe audio: {error_message}")
+                200,
+                {
+                    "success": False,
+                    "error": "Speech recognition failed"
+                }
             )
+
+        transcript = transcript.strip()
+        logger.info(f"Transcription successful: {len(transcript)} characters")
+
+        return lambda_response(
+            200,
+            {
+                "success": True,
+                "text": transcript
+            }
+        )
         
     except base64.binascii.Error as e:
         logger.error(f"Base64 decode error: {str(e)}")

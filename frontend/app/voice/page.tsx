@@ -12,6 +12,82 @@ import { queryAI } from "@/lib/api/query";
 import { useToast } from "@/components/ui/use-toast";
 import type { Language } from "@/lib/types";
 
+function audioBufferToWav(audioBuffer: AudioBuffer): Blob {
+  const numOfChan = audioBuffer.numberOfChannels;
+  const sampleRate = audioBuffer.sampleRate;
+  const numSamples = audioBuffer.length;
+  const bytesPerSample = 2;
+  const blockAlign = numOfChan * bytesPerSample;
+  const byteRate = sampleRate * blockAlign;
+  const dataSize = numSamples * blockAlign;
+
+  const buffer = new ArrayBuffer(44 + dataSize);
+  const view = new DataView(buffer);
+
+  let offset = 0;
+
+  const writeString = (s: string) => {
+    for (let i = 0; i < s.length; i++) {
+      view.setUint8(offset + i, s.charCodeAt(i));
+    }
+    offset += s.length;
+  };
+
+  // RIFF identifier
+  writeString("RIFF");
+  // file length minus RIFF identifier length and file description length
+  view.setUint32(offset, 36 + dataSize, true);
+  offset += 4;
+  // RIFF type
+  writeString("WAVE");
+  // format chunk identifier
+  writeString("fmt ");
+  // format chunk length
+  view.setUint32(offset, 16, true);
+  offset += 4;
+  // sample format (raw)
+  view.setUint16(offset, 1, true);
+  offset += 2;
+  // channel count
+  view.setUint16(offset, numOfChan, true);
+  offset += 2;
+  // sample rate
+  view.setUint32(offset, sampleRate, true);
+  offset += 4;
+  // byte rate (sample rate * block align)
+  view.setUint32(offset, byteRate, true);
+  offset += 4;
+  // block align (channel count * bytes per sample)
+  view.setUint16(offset, blockAlign, true);
+  offset += 2;
+  // bits per sample
+  view.setUint16(offset, bytesPerSample * 8, true);
+  offset += 2;
+  // data chunk identifier
+  writeString("data");
+  // data chunk length
+  view.setUint32(offset, dataSize, true);
+  offset += 4;
+
+  // Write interleaved PCM samples
+  const channels: Float32Array[] = [];
+  for (let i = 0; i < numOfChan; i++) {
+    channels.push(audioBuffer.getChannelData(i));
+  }
+
+  for (let i = 0; i < numSamples; i++) {
+    for (let ch = 0; ch < numOfChan; ch++) {
+      let sample = channels[ch][i];
+      sample = Math.max(-1, Math.min(1, sample));
+      const intSample = sample < 0 ? sample * 0x8000 : sample * 0x7fff;
+      view.setInt16(offset, intSample, true);
+      offset += 2;
+    }
+  }
+
+  return new Blob([buffer], { type: "audio/wav" });
+}
+
 export default function VoicePage() {
   const [isRecording, setIsRecording] = useState(false);
   const [isProcessing, setIsProcessing] = useState(false);
@@ -39,7 +115,9 @@ export default function VoicePage() {
   const startRecording = async () => {
     try {
       const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
-      const mediaRecorder = new MediaRecorder(stream);
+      const mediaRecorder = new MediaRecorder(stream, {
+        mimeType: "audio/webm",
+      });
       mediaRecorderRef.current = mediaRecorder;
       audioChunksRef.current = [];
 
@@ -89,11 +167,17 @@ export default function VoicePage() {
 
     try {
       // Step 1: Speech to Text
-      // Convert recorded Blob into a File so our API helper (FormData) accepts it
-      const audioFile = new File([audioBlob], "recording.webm", {
-        type: "audio/webm",
+      // Convert recorded WEBM Blob into WAV before sending to backend
+      const audioContext = new AudioContext();
+      const arrayBuffer = await audioBlob.arrayBuffer();
+      const audioBuffer = await audioContext.decodeAudioData(arrayBuffer);
+      const wavBlob = audioBufferToWav(audioBuffer);
+      await audioContext.close();
+
+      const audioFile = new File([wavBlob], "recording.wav", {
+        type: "audio/wav",
       });
-      const sttResponse = await speechToText(audioFile);
+      const sttResponse = await speechToText(audioFile, language);
       const transcribedText = sttResponse.text;
       setTranscript(transcribedText);
 
@@ -174,11 +258,10 @@ export default function VoicePage() {
               <div className="relative">
                 <Button
                   size="lg"
-                  className={`h-24 w-24 rounded-full ${
-                    isRecording
+                  className={`h-24 w-24 rounded-full ${isRecording
                       ? "bg-destructive hover:bg-destructive/90 animate-pulse"
                       : ""
-                  }`}
+                    }`}
                   onClick={isRecording ? stopRecording : startRecording}
                   disabled={isProcessing}
                 >

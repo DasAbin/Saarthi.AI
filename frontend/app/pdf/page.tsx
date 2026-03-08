@@ -1,6 +1,7 @@
 "use client";
 
 import { useState, useRef } from "react";
+import { useRouter } from "next/navigation";
 import type { ChangeEvent } from "react";
 import {
   Upload,
@@ -49,8 +50,10 @@ export default function PDFPage() {
   const [selectedLanguage, setSelectedLanguage] = useState<string>("en");
   const [audioLoading, setAudioLoading] = useState(false);
   const [audioInstance, setAudioInstance] = useState<HTMLAudioElement | null>(null);
+  const [isPlayingAudio, setIsPlayingAudio] = useState(false);
   const fileInputRef = useRef<HTMLInputElement>(null);
   const { toast } = useToast();
+  const router = useRouter();
 
   const handleFileChange = (e: ChangeEvent<HTMLInputElement>) => {
     const selectedFile = e.target.files?.[0];
@@ -83,6 +86,14 @@ export default function PDFPage() {
 
   const handleUpload = async (languageOverride?: string) => {
     if (!file || loading || polling) return;
+
+    // Reset any ongoing audio playback when starting a new analysis
+    if (audioInstance) {
+      audioInstance.pause();
+      audioInstance.currentTime = 0;
+      setAudioInstance(null);
+      setIsPlayingAudio(false);
+    }
 
     const languageToUse = languageOverride || selectedLanguage;
 
@@ -200,6 +211,12 @@ export default function PDFPage() {
     try {
       setAudioLoading(true);
 
+      // Stop and reset any existing audio instance
+      if (audioInstance) {
+        audioInstance.pause();
+        audioInstance.currentTime = 0;
+      }
+
       const speechText = `Here is a summary of the document. ${result.summary}`;
 
       const audioBlob = await generateSpeech(
@@ -210,9 +227,15 @@ export default function PDFPage() {
       const audioUrl = URL.createObjectURL(audioBlob);
       const audio = new Audio(audioUrl);
 
-      setAudioInstance(audio);
+      audio.onended = () => {
+        setIsPlayingAudio(false);
+        setAudioInstance(null);
+      };
 
-      audio.play();
+      setAudioInstance(audio);
+      setIsPlayingAudio(true);
+
+      await audio.play();
     } catch (err) {
       console.error(err);
     } finally {
@@ -225,6 +248,7 @@ export default function PDFPage() {
       audioInstance.pause();
       audioInstance.currentTime = 0;
       setAudioInstance(null);
+      setIsPlayingAudio(false);
     }
   };
 
@@ -619,14 +643,14 @@ export default function PDFPage() {
                 <Button
                   variant="outline"
                   onClick={playAudio}
-                  disabled={audioLoading}
+                  disabled={audioLoading || isPlayingAudio}
                 >
                   {audioLoading ? "Generating Audio..." : "▶ Listen"}
                 </Button>
                 <Button
                   variant="outline"
                   onClick={stopAudio}
-                  disabled={!audioInstance}
+                  disabled={!isPlayingAudio}
                 >
                   ⏹ Stop
                 </Button>
@@ -661,6 +685,14 @@ export default function PDFPage() {
               </div>
             </CardContent>
           </Card>
+
+          <Button
+            variant="default"
+            onClick={() => router.push(result.document_id ? `/chat?docId=${result.document_id}` : "/chat")}
+            className="mt-4"
+          >
+            💬 Ask AI about this document
+          </Button>
         </div>
       )}
     </div>

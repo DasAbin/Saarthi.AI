@@ -10,9 +10,16 @@ export interface ApiResponse<T> {
 }
 
 // RAG Query Types
+export interface ChatHistoryItem {
+  role: "user" | "assistant";
+  content: string;
+}
+
 export interface QueryRequest {
   query: string;
   language: "en" | "hi" | "mr";
+  docId?: string;
+  history?: ChatHistoryItem[];
 }
 
 export interface QueryResponse {
