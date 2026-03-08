@@ -26,12 +26,28 @@ async function getUploadUrl(file: File): Promise<UploadUrlResponse> {
 }
 
 /**
+ * Check the status of a document processing job
+ */
+export async function checkJobStatus(jobId: string): Promise<PDFProcessResponse> {
+  const response = await apiClient.get<PDFProcessResponse>(`/pdf/${jobId}`);
+
+  if (!response.success || !response.data) {
+    throw new Error(response.message || "Failed to check job status");
+  }
+
+  return response.data;
+}
+
+/**
  * Process a document (PDF, Word, image, etc.) using:
  * 1) POST /upload-url
  * 2) PUT file to presigned S3 URL
  * 3) POST /pdf with { s3Key, filename }
+ * 
+ * For PDFs, this starts an async job and returns a jobId.
+ * For images, this processes synchronously and returns the result.
  */
-export async function processPDF(file: File): Promise<PDFProcessResponse> {
+export async function processPDF(file: File): Promise<PDFProcessResponse | { jobId: string; status: string }> {
   // Validate file size before processing
   if (file.size > MAX_FILE_SIZE) {
     throw new Error(`File size must be less than ${MAX_FILE_SIZE / 1024 / 1024}MB`);
@@ -57,17 +73,12 @@ export async function processPDF(file: File): Promise<PDFProcessResponse> {
       );
     }
 
-    // 3) Trigger processing (allow up to 120s for Textract + analysis)
-    const response = await apiClient.post<PDFProcessResponse>(
+    // 3) Trigger processing
+    const response = await apiClient.post<PDFProcessResponse | { jobId: string; status: string }>(
       "/pdf",
       {
         s3Key: key,
         filename: file.name,
-      },
-      {
-        // Custom option consumed in ApiClient.request to set AbortController timeout
-        // 120_000 ms = 120 seconds
-        timeout: 120_000 as any,
       }
     );
 
@@ -75,7 +86,13 @@ export async function processPDF(file: File): Promise<PDFProcessResponse> {
       throw new Error(response.message || "Failed to process document");
     }
 
-    return response.data;
+    // If response contains jobId, it's an async PDF job - return it for polling
+    if ("jobId" in response.data && "status" in response.data) {
+      return response.data;
+    }
+
+    // Otherwise, it's a synchronous result (images) - return directly
+    return response.data as PDFProcessResponse;
   } catch (error) {
     if (error instanceof Error) {
       throw error;

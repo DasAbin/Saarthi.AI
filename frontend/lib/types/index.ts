@@ -29,16 +29,55 @@ export interface Source {
 }
 
 // PDF Processing Types
+export interface SchemeFacts {
+  scheme_name: string;
+  coverage_amount: string;
+  launch_year: string;
+  beneficiaries: string;
+  target_population: string;
+  institution: string;
+}
+
+export interface StakeholderRole {
+  role: string;
+  responsibilities: string[];
+}
+
+export interface KeyContact {
+  service: string;
+  contact: string;
+}
+
+export interface FAQ {
+  question: string;
+  answer: string;
+}
+
 export interface PDFProcessResponse {
+  // New structured intelligence fields
+  document_overview: string;
+  scheme_facts: SchemeFacts;
+  eligibility_and_coverage: string[];
+  healthcare_benefits: string[];
+  operational_workflow: string[];
+  stakeholders_and_roles: StakeholderRole[];
+  community_impact: string[];
+  policy_insights: string[];
+  key_contacts: KeyContact[];
+  frequently_asked_questions: FAQ[];
+  summary: string;
+  // Legacy fields for backward compatibility
   document_type: string;
   purpose: string;
   key_points: string[];
   instructions: string[];
-  summary: string;
+  // Metadata
   extracted_text: string;
   s3_key?: string;
   document_id?: string;
   chunk_count?: number;
+  status?: "done" | "processing" | "error";
+  error?: string;
 }
 
 // Scheme Recommendation Types

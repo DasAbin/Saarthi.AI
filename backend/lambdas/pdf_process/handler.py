@@ -14,6 +14,7 @@ import logging
 import os
 import sys
 import uuid
+import boto3
 from typing import Any, Dict
 
 # Add parent directory to path for imports
@@ -31,6 +32,10 @@ from rag.embedding_service import generate_embedding
 # Configure logging
 logger = logging.getLogger()
 logger.setLevel(logging.INFO)
+
+# Initialize AWS clients
+textract_client = boto3.client("textract", region_name=os.getenv("AWS_REGION", "ap-south-1"))
+s3_client = boto3.client("s3", region_name=os.getenv("AWS_REGION", "ap-south-1"))
 
 
 def handler(event: Dict[str, Any], context: Any) -> Dict[str, Any]:
@@ -137,14 +142,77 @@ def handler(event: Dict[str, Any], context: Any) -> Dict[str, Any]:
             "textract.detect_document_text",
         )
 
-        # Derive a stable document identifier
-        document_id = s3_key or f"doc-{uuid.uuid4().hex}"
+        # Generate a unique document_id/jobId for this processing job
+        document_id = f"doc-{uuid.uuid4().hex[:16]}"
+        logger.info("Generated document_id=%s for s3_key=%s", document_id, s3_key)
 
-        # Step 1: Extract text using Amazon Textract (Production pipeline)
-        # Textract reads directly from S3, no need to download to /tmp
-        # Textract DetectDocumentText supports both PDFs and images
+        # Step 1: Start async Textract job for PDFs (images can use sync)
+        # For PDFs, use async Textract to avoid Lambda timeout
+        # For images, we can use sync Textract (DetectDocumentText)
+        if file_extension == "pdf":
+            logger.info(
+                "Starting async Textract job for PDF - extension=%s s3_key=%s",
+                file_extension,
+                s3_key,
+            )
+            try:
+                # Start async Textract job
+                textract_response = textract_client.start_document_text_detection(
+                    DocumentLocation={
+                        "S3Object": {
+                            "Bucket": PDF_BUCKET,
+                            "Name": s3_key,
+                        }
+                    }
+                )
+                textract_job_id = textract_response.get("JobId")
+                if not textract_job_id:
+                    raise Exception("Textract did not return a JobId")
+                
+                logger.info("Started Textract async job: job_id=%s", textract_job_id)
+
+                # Save job metadata to S3 for status polling
+                job_metadata = {
+                    "document_id": document_id,
+                    "s3_key": s3_key,
+                    "filename": filename,
+                    "file_extension": file_extension,
+                    "textract_job_id": textract_job_id,
+                    "job_type": "async",
+                    "status": "processing",
+                }
+                meta_key = f"jobs/{document_id}/meta.json"
+                s3_client.put_object(
+                    Bucket=PDF_BUCKET,
+                    Key=meta_key,
+                    Body=json.dumps(job_metadata),
+                    ContentType="application/json",
+                )
+                logger.info("Saved job metadata to s3://%s/%s", PDF_BUCKET, meta_key)
+
+                # Return jobId immediately - frontend will poll for status
+                return lambda_response(
+                    202,
+                    success_response(
+                        {
+                            "jobId": document_id,
+                            "status": "processing",
+                            "message": "Document processing started",
+                        },
+                        message="Document processing started successfully",
+                    ),
+                )
+            except Exception as e:
+                error_message = str(e)
+                logger.error(f"Failed to start Textract async job: {error_message}", exc_info=True)
+                return lambda_response(
+                    500,
+                    error_response(f"Failed to start document processing: {error_message}"),
+                )
+        
+        # For images, use synchronous Textract (existing flow)
         logger.info(
-            "Starting Textract extraction - extension=%s s3_key=%s",
+            "Starting sync Textract extraction for image - extension=%s s3_key=%s",
             file_extension,
             s3_key,
         )
@@ -266,8 +334,9 @@ def handler(event: Dict[str, Any], context: Any) -> Dict[str, Any]:
                     continue
         
         # Step 5: Structured document analysis via Bedrock
-        # To avoid API Gateway/Lambda timeout, only send the first 8k characters
-        analysis_text = cleaned_text[:8000]
+        # To avoid API Gateway/Lambda timeout, only send the first 5k characters
+        # (Textract takes ~24-25s, so we need to keep Bedrock analysis under 4-5s)
+        analysis_text = cleaned_text[:5000]
         logger.info(
             "Sending %d characters to Bedrock for analysis",
             len(analysis_text),
@@ -276,13 +345,27 @@ def handler(event: Dict[str, Any], context: Any) -> Dict[str, Any]:
 
         logger.info("PDF processing and analysis completed successfully")
 
-        # Build payload matching PDFProcessResponse type
+        # Build payload with new structured intelligence report
+        # Maintain backward compatibility by including legacy fields derived from new structure
         payload = {
-            "document_type": analysis.get("document_type", "Unknown"),
-            "purpose": analysis.get("purpose", ""),
-            "key_points": analysis.get("key_points", []),
-            "instructions": analysis.get("instructions", []),
+            # New structured fields
+            "document_overview": analysis.get("document_overview", ""),
+            "scheme_facts": analysis.get("scheme_facts", {}),
+            "eligibility_and_coverage": analysis.get("eligibility_and_coverage", []),
+            "healthcare_benefits": analysis.get("healthcare_benefits", []),
+            "operational_workflow": analysis.get("operational_workflow", []),
+            "stakeholders_and_roles": analysis.get("stakeholders_and_roles", []),
+            "community_impact": analysis.get("community_impact", []),
+            "policy_insights": analysis.get("policy_insights", []),
+            "key_contacts": analysis.get("key_contacts", []),
+            "frequently_asked_questions": analysis.get("frequently_asked_questions", []),
             "summary": analysis.get("summary", ""),
+            # Legacy fields for backward compatibility (derived from new structure)
+            "document_type": analysis.get("scheme_facts", {}).get("scheme_name", "Unknown") or "Government Document",
+            "purpose": analysis.get("document_overview", ""),
+            "key_points": analysis.get("eligibility_and_coverage", [])[:5] + analysis.get("healthcare_benefits", [])[:3],
+            "instructions": analysis.get("operational_workflow", []),
+            # Metadata
             "extracted_text": cleaned_text,
             "s3_key": s3_key,
             "document_id": document_id,

@@ -183,6 +183,15 @@ export class SaarthiAiStack extends cdk.Stack {
       timeout: cdk.Duration.minutes(10),
     });
 
+    const pdfStatusLambda = new lambda.Function(this, 'PdfStatusLambda', {
+      ...commonLambdaProps,
+      functionName: 'saarthi-document-status',
+      code: lambda.Code.fromAsset('../backend'),
+      handler: 'lambdas/pdf_status/handler.handler',
+      memorySize: 1024,
+      timeout: cdk.Duration.minutes(5),
+    });
+
     const recommendSchemesLambda = new lambda.Function(this, 'RecommendSchemesLambda', {
       ...commonLambdaProps,
       functionName: 'saarthi-recommend-schemes',
@@ -243,6 +252,7 @@ export class SaarthiAiStack extends cdk.Stack {
     // API Gateway Integrations
     const queryIntegration = new apigateway.LambdaIntegration(ragQueryLambda);
     const pdfIntegration = new apigateway.LambdaIntegration(pdfProcessLambda);
+    const pdfStatusIntegration = new apigateway.LambdaIntegration(pdfStatusLambda);
     const uploadUrlIntegration = new apigateway.LambdaIntegration(uploadUrlLambda);
     const recommendIntegration = new apigateway.LambdaIntegration(recommendSchemesLambda);
     const sttIntegration = new apigateway.LambdaIntegration(sttHandlerLambda);
@@ -257,6 +267,8 @@ export class SaarthiAiStack extends cdk.Stack {
     // Document processing routes
     const pdfResource = api.root.addResource('pdf');
     pdfResource.addMethod('POST', pdfIntegration);
+    const pdfStatusResource = pdfResource.addResource('{document_id}');
+    pdfStatusResource.addMethod('GET', pdfStatusIntegration);
 
     // New upload-url route for presigned S3 uploads
     api.root.addResource('upload-url').addMethod('POST', uploadUrlIntegration);

@@ -57,3 +57,20 @@
     @apply bg-background text-foreground;
   }
 }
+
+/* Hide Next.js dev indicator in production */
+@layer utilities {
+  /* Hide Next.js dev overlay indicator (only shows in dev mode, but hide it explicitly) */
+  [data-nextjs-dialog-overlay],
+  [data-nextjs-toast],
+  [id^="__next-dev-overlay"],
+  [class*="__next-dev-overlay"] {
+    display: none !important;
+  }
+  
+  /* Hide the circular "N" indicator in production builds */
+  body:not([data-nextjs-dev]) [data-nextjs-dialog-overlay],
+  body:not([data-nextjs-dev]) [id^="__next-dev-overlay"] {
+    display: none !important;
+  }
+}
