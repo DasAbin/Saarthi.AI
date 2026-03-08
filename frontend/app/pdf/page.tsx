@@ -180,7 +180,7 @@ export default function PDFPage() {
   };
 
   return (
-    <div className="w-full max-w-[1500px] mx-auto px-8 py-6">
+    <div className="w-full max-w-[1800px] mx-auto px-8 py-6">
       <div className="mb-8">
         <h1 className="text-3xl font-bold mb-2">Document Analyzer</h1>
         <p className="text-muted-foreground">

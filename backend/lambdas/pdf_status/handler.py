@@ -16,6 +16,7 @@ import logging
 import os
 import sys
 import boto3
+from botocore.exceptions import ClientError
 
 from typing import Any, Dict
 
@@ -109,8 +110,12 @@ def handler(event: Dict[str, Any], context: Any) -> Dict[str, Any]:
             cached = json.loads(obj["Body"].read())
             logger.info("Returning cached result for document_id=%s", document_id)
             return lambda_response(200, success_response(cached, message="Document processed successfully"))
-        except s3.exceptions.NoSuchKey:
-            pass  # Not cached yet, continue
+        except ClientError as e:
+            error_code = e.response.get("Error", {}).get("Code", "")
+            if error_code == "NoSuchKey":
+                pass  # Not cached yet, continue
+            else:
+                logger.warning("Error checking cached result: %s", str(e))
         except Exception:
             pass  # Ignore cache read errors
 
@@ -119,6 +124,21 @@ def handler(event: Dict[str, Any], context: Any) -> Dict[str, Any]:
         try:
             obj = s3.get_object(Bucket=PDF_BUCKET, Key=meta_key)
             job_meta = json.loads(obj["Body"].read())
+        except ClientError as e:
+            error_code = e.response.get("Error", {}).get("Code", "")
+            if error_code == "NoSuchKey":
+                # Metadata file doesn't exist yet - job might still be initializing
+                logger.info("Job metadata not found for document_id=%s, returning processing status", document_id)
+                return lambda_response(
+                    202,
+                    success_response(
+                        {"document_id": document_id, "status": "processing"},
+                        message="Document is being processed",
+                    ),
+                )
+            else:
+                logger.error("Failed to load job metadata: %s", str(e))
+                return lambda_response(404, error_response("Document job not found"))
         except Exception as e:
             logger.error("Failed to load job metadata: %s", str(e))
             return lambda_response(404, error_response("Document job not found"))
