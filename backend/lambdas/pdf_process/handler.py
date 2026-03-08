@@ -58,9 +58,20 @@ def handler(event: Dict[str, Any], context: Any) -> Dict[str, Any]:
     """
     try:
         logger.info("Document process handler invoked")
-        
+
+        # ── Input size guard ────────────────────────────────────────────────
+        # A base64-encoded 10MB file is ~13.5MB of text. Reject anything
+        # larger to prevent the Lambda from OOM-killing mid-decode.
+        MAX_BASE64_BYTES = 15 * 1024 * 1024  # 15MB base64 ≈ ~10MB file
+        body_raw = event.get("body", "") or ""
+        if isinstance(body_raw, str) and len(body_raw) > MAX_BASE64_BYTES:
+            return lambda_response(
+                400,
+                error_response("File too large. Maximum supported size is 10MB."),
+            )
+
         # Parse JSON body
-        body = event.get("body") or "{}"
+        body = body_raw or "{}"
         if isinstance(body, str):
             try:
                 body = json.loads(body)

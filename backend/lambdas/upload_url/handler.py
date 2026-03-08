@@ -26,10 +26,20 @@ from utils.response import error_response, lambda_response, success_response
 logger = logging.getLogger()
 logger.setLevel(logging.INFO)
 
+from botocore.config import Config
+
 S3_REGION = os.getenv("AWS_REGION", os.getenv("AWS_DEFAULT_REGION", "ap-south-1"))
 PDF_BUCKET = os.getenv("PDF_BUCKET")
 
-s3_client = boto3.client("s3", region_name=S3_REGION)
+s3_client = boto3.client(
+    "s3", 
+    region_name=S3_REGION,
+    endpoint_url=f"https://s3.{S3_REGION}.amazonaws.com",
+    config=Config(
+        signature_version="s3v4",
+        s3={"addressing_style": "virtual"}
+    )
+)
 
 
 def handler(event: Dict[str, Any], context: Any) -> Dict[str, Any]:

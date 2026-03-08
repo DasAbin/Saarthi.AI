@@ -96,6 +96,13 @@ def handler(event: Dict[str, Any], context: Any) -> Dict[str, Any]:
                 400,
                 error_response("Query is required")
             )
+
+        if len(query) > 2000:
+            logger.warning("Query too long: %d characters", len(query))
+            return lambda_response(
+                400,
+                error_response("Query must be under 2000 characters")
+            )
         
         if language not in ["en", "hi", "mr"]:
             logger.warning(f"Invalid language: {language}")

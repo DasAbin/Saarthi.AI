@@ -5,6 +5,7 @@ import { Toaster } from "@/components/ui/toaster";
 import { Header } from "@/components/layout/Header";
 import { Footer } from "@/components/layout/Footer";
 import { ErrorBoundary } from "@/components/common/ErrorBoundary";
+import { DemoBanner } from "@/components/ui/DemoBanner";
 
 const inter = Inter({ subsets: ["latin"] });
 
@@ -24,6 +25,7 @@ export default function RootLayout({
       <body className={inter.className}>
         <ErrorBoundary>
           <div className="flex min-h-screen flex-col">
+            <DemoBanner />
             <Header />
             <main className="flex-1">{children}</main>
             <Footer />

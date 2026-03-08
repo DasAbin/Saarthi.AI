@@ -20,8 +20,8 @@ logger = logging.getLogger()
 logger.setLevel(logging.INFO)
 
 # Initialize DynamoDB client
-dynamodb = boto3.resource("dynamodb", region_name=os.getenv("AWS_REGION", "us-east-1"))
-dynamodb_client = boto3.client("dynamodb", region_name=os.getenv("AWS_REGION", "us-east-1"))
+dynamodb = boto3.resource("dynamodb", region_name=os.getenv("AWS_REGION", "ap-south-1"))
+dynamodb_client = boto3.client("dynamodb", region_name=os.getenv("AWS_REGION", "ap-south-1"))
 
 # Table name from environment
 TABLE_NAME = os.getenv("DYNAMODB_TABLE", "saarthi-vectors")

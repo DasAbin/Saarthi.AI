@@ -19,8 +19,8 @@ logger = logging.getLogger()
 logger.setLevel(logging.INFO)
 
 # Initialize clients
-transcribe_client = boto3.client("transcribe", region_name=os.getenv("AWS_REGION", "us-east-1"))
-s3_client = boto3.client("s3", region_name=os.getenv("AWS_REGION", "us-east-1"))
+transcribe_client = boto3.client("transcribe", region_name=os.getenv("AWS_REGION", "ap-south-1"))
+s3_client = boto3.client("s3", region_name=os.getenv("AWS_REGION", "ap-south-1"))
 
 # Temp bucket for audio files
 TEMP_AUDIO_BUCKET = os.getenv("TEMP_AUDIO_BUCKET", "saarthi-temp-audio")

@@ -18,6 +18,7 @@ sys.path.append(os.path.join(os.path.dirname(__file__), "../.."))
 from utils.response import success_response, error_response, lambda_response
 from utils.aws.bedrock import invoke_claude
 from utils.data.schemes_db import SCHEMES_DATABASE, filter_schemes_by_profile
+from utils.text_utils import parse_llm_json
 
 # Configure logging
 logger = logging.getLogger()
@@ -153,36 +154,22 @@ Return exactly 3 schemes, ranked by relevance."""
                 temperature=0.3  # Lower temperature for more consistent results
             )
             
-            # Parse JSON from response
-            # Remove markdown code blocks if present
-            cleaned_response = response_text.strip()
-            if "```json" in cleaned_response:
-                json_start = cleaned_response.find("```json") + 7
-                json_end = cleaned_response.find("```", json_start)
-                cleaned_response = cleaned_response[json_start:json_end].strip()
-            elif "```" in cleaned_response:
-                json_start = cleaned_response.find("```") + 3
-                json_end = cleaned_response.find("```", json_start)
-                cleaned_response = cleaned_response[json_start:json_end].strip()
-            
-            # Parse JSON
-            try:
-                schemes = json.loads(cleaned_response)
-                if not isinstance(schemes, list):
-                    schemes = [schemes]
-            except json.JSONDecodeError as e:
-                logger.warning(f"JSON parse error: {str(e)}. Response: {cleaned_response[:200]}")
-                # Fallback: return filtered schemes directly
+            # Parse JSON from LLM response (handles fences, bracket scanning)
+            schemes = parse_llm_json(response_text, fallback=None)
+            if schemes is None:
+                logger.warning("parse_llm_json returned None; using fallback schemes")
                 schemes = [
                     {
                         "name": s["name"],
                         "description": s["description"],
                         "eligibility": s["eligibility"],
                         "apply_steps": s["apply_steps"],
-                        "link": s.get("link")
+                        "link": s.get("link"),
                     }
                     for s in filtered_schemes[:3]
                 ]
+            if not isinstance(schemes, list):
+                schemes = [schemes]
             
             # Ensure we have exactly 3 schemes
             schemes = schemes[:3]

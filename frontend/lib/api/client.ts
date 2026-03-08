@@ -5,6 +5,14 @@
 
 import type { ApiResponse } from "@/lib/types";
 
+if (typeof window !== 'undefined' && !process.env.NEXT_PUBLIC_API_GATEWAY_URL) {
+  console.warn(
+    '[Saarthi.AI] NEXT_PUBLIC_API_GATEWAY_URL is not set. ' +
+    'Requests will fall back to /api (mock backend). ' +
+    'Set this variable in your environment settings (e.g. Amplify).'
+  );
+}
+
 // Prefer calling API Gateway directly when NEXT_PUBLIC_API_GATEWAY_URL is set,
 // otherwise fall back to Next.js API routes under /api (useful for local mocks).
 const DEFAULT_BASE_URL =
@@ -29,8 +37,8 @@ class ApiClient {
     const defaultHeaders: HeadersInit = isFormData
       ? {}
       : {
-          "Content-Type": "application/json",
-        };
+        "Content-Type": "application/json",
+      };
 
     const config: RequestInit = {
       ...options,
@@ -40,8 +48,8 @@ class ApiClient {
       },
     };
 
-    // Support optional timeout via AbortController (in ms)
-    const timeoutMs = (options as any).timeout as number | undefined;
+    // Support optional timeout via AbortController (in ms). Default to 30000ms.
+    const timeoutMs = (options as any).timeout !== undefined ? (options as any).timeout : 30000;
     const controller = typeof AbortController !== "undefined" ? new AbortController() : undefined;
     if (controller) {
       config.signal = controller.signal;
@@ -69,6 +77,9 @@ class ApiClient {
       return await response.json();
     } catch (error) {
       if (error instanceof Error) {
+        if (error.name === 'AbortError') {
+          throw new Error(`Request timed out after ${timeoutMs}ms`);
+        }
         throw error;
       }
       throw new Error("An unexpected error occurred");

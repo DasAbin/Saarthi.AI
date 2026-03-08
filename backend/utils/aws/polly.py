@@ -16,7 +16,7 @@ logger = logging.getLogger()
 logger.setLevel(logging.INFO)
 
 # Initialize Polly client
-polly_client = boto3.client("polly", region_name=os.getenv("AWS_REGION", "us-east-1"))
+polly_client = boto3.client("polly", region_name=os.getenv("AWS_REGION", "ap-south-1"))
 
 # Voice mapping for languages
 VOICE_MAP = {

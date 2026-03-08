@@ -1,13 +1,14 @@
 """
 Lambda handler for health check endpoint.
 
-Simple endpoint to verify Lambda function is running correctly.
+Provides diagnostic info like models, features, and version.
 """
 
 import json
 import os
 import sys
 import logging
+from datetime import datetime, timezone
 from typing import Dict, Any
 
 # Add parent directory to path for imports
@@ -23,21 +24,26 @@ logger.setLevel(logging.INFO)
 def handler(event: Dict[str, Any], context: Any) -> Dict[str, Any]:
     """
     Lambda handler for health check endpoint.
-    
-    Returns:
-    {
-        "success": true,
-        "data": {
-            "status": "ok"
-        }
-    }
     """
     try:
         logger.info("Health check handler invoked")
         
+        payload = {
+            "status": "healthy",
+            "service": "Saarthi.AI",
+            "version": "1.0.0",
+            "region": os.getenv("AWS_REGION", "ap-south-1"),
+            "features": ["rag-query", "pdf-analyze", "scheme-recommend", "voice-stt", "voice-tts", "grievance-writer"],
+            "models": {
+                "text": os.getenv("TEXT_MODEL_ID", "apac.amazon.nova-micro-v1:0"),
+                "embedding": os.getenv("EMBEDDING_MODEL_ID", "amazon.titan-embed-text-v2:0")
+            },
+            "timestamp": datetime.now(timezone.utc).isoformat()
+        }
+
         return lambda_response(
             200,
-            success_response({"status": "ok"})
+            success_response(payload)
         )
         
     except Exception as e:

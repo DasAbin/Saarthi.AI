@@ -2,7 +2,7 @@
  * AWS CDK Infrastructure as Code for Saarthi.AI
  * 
  * This stack creates:
- * - API Gateway
+ * - API Gateway (with rate limiting and proper CORS)
  * - Lambda functions for each endpoint
  * - DynamoDB table for vector storage
  * - S3 buckets for PDFs and embeddings
@@ -25,33 +25,49 @@ export class SaarthiAiStack extends cdk.Stack {
 
     // S3 Buckets
     const pdfBucket = new s3.Bucket(this, 'SaarthiPdfBucket', {
-      bucketName: `saarthi-pdfs-${this.account}-${this.region}`,
+      bucketName: `saarthi-pdfs-${this.account}-${this.region}-v2`,
       removalPolicy: cdk.RemovalPolicy.RETAIN,
       encryption: s3.BucketEncryption.S3_MANAGED,
       versioned: true,
       lifecycleRules: [{
         expiration: cdk.Duration.days(365),
       }],
+      cors: [
+        {
+          allowedMethods: [s3.HttpMethods.GET, s3.HttpMethods.POST, s3.HttpMethods.PUT, s3.HttpMethods.DELETE],
+          allowedOrigins: ['*'],
+          allowedHeaders: ['*'],
+          maxAge: 3000,
+        },
+      ],
     });
 
     const embeddingsBucket = new s3.Bucket(this, 'SaarthiEmbeddingsBucket', {
-      bucketName: `saarthi-embeddings-${this.account}-${this.region}`,
+      bucketName: `saarthi-embeddings-${this.account}-${this.region}-v2`,
       removalPolicy: cdk.RemovalPolicy.RETAIN,
       encryption: s3.BucketEncryption.S3_MANAGED,
     });
 
     const tempAudioBucket = new s3.Bucket(this, 'SaarthiTempAudioBucket', {
-      bucketName: `saarthi-temp-audio-${this.account}-${this.region}`,
+      bucketName: `saarthi-temp-audio-${this.account}-${this.region}-v2`,
       removalPolicy: cdk.RemovalPolicy.DESTROY,
       encryption: s3.BucketEncryption.S3_MANAGED,
       lifecycleRules: [{
         expiration: cdk.Duration.days(1), // Auto-delete after 1 day
       }],
+      cors: [
+        {
+          allowedMethods: [s3.HttpMethods.GET, s3.HttpMethods.POST, s3.HttpMethods.PUT, s3.HttpMethods.DELETE],
+          allowedOrigins: ['*'],
+          allowedHeaders: ['*'],
+          maxAge: 3000,
+        },
+      ],
     });
 
-    // S3 bucket for conversation logs
+    // S3 bucket for conversation logs (Legacy, migrating to DynamoDB)
     const conversationsBucket = new s3.Bucket(this, 'SaarthiConversationsBucket', {
-      bucketName: `saarthi-conversations-${this.account}-${this.region}`,
+      bucketName: `saarthi-conversations-${this.account}-${this.region}-v2`,
       removalPolicy: cdk.RemovalPolicy.RETAIN,
       encryption: s3.BucketEncryption.S3_MANAGED,
       lifecycleRules: [{
@@ -61,9 +77,8 @@ export class SaarthiAiStack extends cdk.Stack {
 
     // DynamoDB Table for Vector Storage (DocumentChunks)
     const vectorsTable = new dynamodb.Table(this, 'SaarthiVectorsTable', {
-      tableName: 'saarthi-vectors',
+      tableName: 'saarthi-vectors-v2',
       partitionKey: { name: 'chunk_id', type: dynamodb.AttributeType.STRING },
-      sortKey: { name: 'metadata', type: dynamodb.AttributeType.STRING },
       billingMode: dynamodb.BillingMode.PAY_PER_REQUEST,
       removalPolicy: cdk.RemovalPolicy.RETAIN,
       pointInTimeRecoverySpecification: {
@@ -73,10 +88,21 @@ export class SaarthiAiStack extends cdk.Stack {
 
     // DynamoDB table for query cache
     const queryCacheTable = new dynamodb.Table(this, 'SaarthiQueryCacheTable', {
-      tableName: 'saarthi-query-cache',
+      tableName: 'saarthi-query-cache-v2',
       partitionKey: { name: 'query_hash', type: dynamodb.AttributeType.STRING },
       billingMode: dynamodb.BillingMode.PAY_PER_REQUEST,
       removalPolicy: cdk.RemovalPolicy.RETAIN,
+      timeToLiveAttribute: 'expires_at',
+    });
+
+    // DynamoDB table for conversation sessions (atomic per-event writes, replaces S3)
+    const sessionsTable = new dynamodb.Table(this, 'SaarthiSessionsTable', {
+      tableName: 'saarthi-sessions-v2',
+      partitionKey: { name: 'session_id', type: dynamodb.AttributeType.STRING },
+      sortKey: { name: 'timestamp', type: dynamodb.AttributeType.STRING },
+      billingMode: dynamodb.BillingMode.PAY_PER_REQUEST,
+      removalPolicy: cdk.RemovalPolicy.RETAIN,
+      timeToLiveAttribute: 'expires_at',
     });
 
     // Lambda Execution Role
@@ -117,6 +143,15 @@ export class SaarthiAiStack extends cdk.Stack {
       resources: ['*'],
     }));
 
+    // Grant Translate permissions
+    lambdaRole.addToPolicy(new iam.PolicyStatement({
+      effect: iam.Effect.ALLOW,
+      actions: [
+        'translate:TranslateText',
+      ],
+      resources: ['*'],
+    }));
+
     // Grant Transcribe permissions
     lambdaRole.addToPolicy(new iam.PolicyStatement({
       effect: iam.Effect.ALLOW,
@@ -140,6 +175,7 @@ export class SaarthiAiStack extends cdk.Stack {
     // Grant DynamoDB permissions
     vectorsTable.grantReadWriteData(lambdaRole);
     queryCacheTable.grantReadWriteData(lambdaRole);
+    sessionsTable.grantReadWriteData(lambdaRole);
 
     // Lambda Functions
     const commonLambdaProps = {
@@ -154,20 +190,17 @@ export class SaarthiAiStack extends cdk.Stack {
         DYNAMODB_TABLE: vectorsTable.tableName,
         CONVERSATIONS_BUCKET: conversationsBucket.bucketName,
         QUERY_CACHE_TABLE: queryCacheTable.tableName,
-        // Optional: override these at deploy-time or in the Lambda console
-        // when AWS retires or replaces a specific model version.
-        // Recommended defaults for ap-south-1:
-        // - Nova Micro via APAC inference profile (Converse API)
-        // - Titan Embeddings (InvokeModel API)
         TEXT_MODEL_ID: process.env.TEXT_MODEL_ID ?? 'apac.amazon.nova-micro-v1:0',
         EMBEDDING_MODEL_ID: process.env.EMBEDDING_MODEL_ID ?? 'amazon.titan-embed-text-v2:0',
+        SESSIONS_TABLE: sessionsTable.tableName,
+        CACHE_TTL_SECONDS: '86400',
       },
       logRetention: logs.RetentionDays.ONE_WEEK,
     };
 
     const ragQueryLambda = new lambda.Function(this, 'RagQueryLambda', {
       ...commonLambdaProps,
-      functionName: 'saarthi-rag-query',
+      functionName: 'saarthi-rag-query-v2',
       // Package the entire backend so shared utils are available to all Lambdas
       code: lambda.Code.fromAsset('../backend'),
       handler: 'lambdas/rag_query/handler.handler',
@@ -176,7 +209,7 @@ export class SaarthiAiStack extends cdk.Stack {
 
     const pdfProcessLambda = new lambda.Function(this, 'PdfProcessLambda', {
       ...commonLambdaProps,
-      functionName: 'saarthi-document-process',
+      functionName: 'saarthi-document-process-v2',
       code: lambda.Code.fromAsset('../backend'),
       handler: 'lambdas/pdf_process/handler.handler',
       memorySize: 2048, // More memory for PDF processing
@@ -185,7 +218,7 @@ export class SaarthiAiStack extends cdk.Stack {
 
     const pdfStatusLambda = new lambda.Function(this, 'PdfStatusLambda', {
       ...commonLambdaProps,
-      functionName: 'saarthi-document-status',
+      functionName: 'saarthi-document-status-v2',
       code: lambda.Code.fromAsset('../backend'),
       handler: 'lambdas/pdf_status/handler.handler',
       memorySize: 1024,
@@ -194,14 +227,14 @@ export class SaarthiAiStack extends cdk.Stack {
 
     const recommendSchemesLambda = new lambda.Function(this, 'RecommendSchemesLambda', {
       ...commonLambdaProps,
-      functionName: 'saarthi-recommend-schemes',
+      functionName: 'saarthi-recommend-schemes-v2',
       code: lambda.Code.fromAsset('../backend'),
       handler: 'lambdas/recommend_schemes/handler.handler',
     });
 
     const sttHandlerLambda = new lambda.Function(this, 'SttHandlerLambda', {
       ...commonLambdaProps,
-      functionName: 'saarthi-stt-handler',
+      functionName: 'saarthi-stt-handler-v2',
       code: lambda.Code.fromAsset('../backend'),
       handler: 'lambdas/stt_handler/handler.handler',
       timeout: cdk.Duration.minutes(10), // Transcribe can take time
@@ -209,21 +242,21 @@ export class SaarthiAiStack extends cdk.Stack {
 
     const ttsHandlerLambda = new lambda.Function(this, 'TtsHandlerLambda', {
       ...commonLambdaProps,
-      functionName: 'saarthi-tts-handler',
+      functionName: 'saarthi-tts-handler-v2',
       code: lambda.Code.fromAsset('../backend'),
       handler: 'lambdas/tts_handler/handler.handler',
     });
 
     const grievanceHandlerLambda = new lambda.Function(this, 'GrievanceHandlerLambda', {
       ...commonLambdaProps,
-      functionName: 'saarthi-grievance-handler',
+      functionName: 'saarthi-grievance-handler-v2',
       code: lambda.Code.fromAsset('../backend'),
       handler: 'lambdas/grievance_handler/handler.handler',
     });
 
     const uploadUrlLambda = new lambda.Function(this, 'UploadUrlLambda', {
       ...commonLambdaProps,
-      functionName: 'saarthi-upload-url',
+      functionName: 'saarthi-upload-url-v2',
       code: lambda.Code.fromAsset('../backend'),
       handler: 'lambdas/upload_url/handler.handler',
       memorySize: 256,
@@ -231,7 +264,7 @@ export class SaarthiAiStack extends cdk.Stack {
 
     const healthLambda = new lambda.Function(this, 'HealthLambda', {
       ...commonLambdaProps,
-      functionName: 'saarthi-health',
+      functionName: 'saarthi-health-v2',
       code: lambda.Code.fromAsset('../backend'),
       handler: 'lambdas/health/handler.handler',
       memorySize: 128,
@@ -239,12 +272,19 @@ export class SaarthiAiStack extends cdk.Stack {
 
     // API Gateway
     const api = new apigateway.RestApi(this, 'SaarthiApi', {
-      restApiName: 'Saarthi.AI API',
+      restApiName: 'Saarthi.AI API v2',
       description: 'API Gateway for Saarthi.AI',
+      deployOptions: {
+        stageName: 'prod',
+        throttlingRateLimit: 50,
+        throttlingBurstLimit: 100,
+        loggingLevel: apigateway.MethodLoggingLevel.INFO,
+        metricsEnabled: true,
+      },
       defaultCorsPreflightOptions: {
         allowOrigins: apigateway.Cors.ALL_ORIGINS,
         allowMethods: apigateway.Cors.ALL_METHODS,
-        allowHeaders: ['Content-Type', 'X-Amz-Date', 'Authorization', 'X-Api-Key'],
+        allowHeaders: ['Content-Type', 'X-Amz-Date', 'Authorization', 'X-Api-Key', 'X-Session-Id', 'X-Language-Code'],
       },
       binaryMediaTypes: ['application/pdf', 'audio/*', 'multipart/form-data'],
     });
@@ -273,17 +313,18 @@ export class SaarthiAiStack extends cdk.Stack {
     // New upload-url route for presigned S3 uploads
     api.root.addResource('upload-url').addMethod('POST', uploadUrlIntegration);
     api.root.addResource('recommend').addMethod('POST', recommendIntegration);
-    
+
     const voiceResource = api.root.addResource('voice');
     voiceResource.addResource('stt').addMethod('POST', sttIntegration);
     voiceResource.addResource('tts').addMethod('POST', ttsIntegration);
-    
+
     api.root.addResource('grievance').addMethod('POST', grievanceIntegration);
 
     // Outputs
     new cdk.CfnOutput(this, 'ApiGatewayUrl', {
       value: api.url,
-      description: 'API Gateway URL',
+      description: 'Set as NEXT_PUBLIC_API_GATEWAY_URL in frontend environment variables',
+      exportName: 'SaarthiApiUrlV2',
     });
 
     new cdk.CfnOutput(this, 'PdfBucketName', {

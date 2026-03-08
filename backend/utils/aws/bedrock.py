@@ -20,7 +20,7 @@ logger.setLevel(logging.INFO)
 # Initialize Bedrock client
 bedrock_runtime = boto3.client(
     "bedrock-runtime",
-    region_name=os.getenv("AWS_REGION", "us-east-1")
+    region_name=os.getenv("AWS_REGION", "ap-south-1")
 )
 
 # Model IDs
