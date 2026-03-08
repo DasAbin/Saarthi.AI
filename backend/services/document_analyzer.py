@@ -11,75 +11,103 @@ import json
 import logging
 from typing import Any, Dict, List
 
+import boto3
+
 from utils.aws.bedrock import invoke_claude
 
 logger = logging.getLogger(__name__)
 logger.setLevel(logging.INFO)
 
+# AWS Translate client (region inherited from environment/AWS config)
+translate = boto3.client("translate")
+
 
 SYSTEM_PROMPT = (
-    "You are an expert policy analyst AI that analyzes government documents and "
-    "produces structured intelligence reports for public service applications."
+    "You are an expert government policy analyst that analyzes official documents "
+    "and produces detailed, structured intelligence reports for public service applications."
 )
 
 
 def _build_prompt(text: str) -> str:
-    return (
-        "You are an expert policy analyst AI.\n\n"
-        "Analyze the extracted document and produce a structured intelligence report.\n\n"
-        "Focus on:\n"
-        "* Key policy facts\n"
-        "* Eligibility criteria\n"
-        "* Healthcare benefits\n"
-        "* Operational workflows\n"
-        "* Stakeholder roles\n"
-        "* Community impact\n"
-        "* Important contacts\n"
-        "* Frequently asked questions\n"
-        "* Insights useful for government or public service applications\n\n"
-        "Return the response strictly in JSON using the following schema:\n\n"
-        "{\n"
-        '  "document_overview": "2-4 sentence overview of the document",\n'
-        '  "scheme_facts": {\n'
-        '    "scheme_name": "name of the scheme or program",\n'
-        '    "coverage_amount": "financial coverage or benefit amount if applicable",\n'
-        '    "launch_year": "year the scheme was launched if mentioned",\n'
-        '    "beneficiaries": "target beneficiary description",\n'
-        '    "target_population": "who this document/scheme is for",\n'
-        '    "institution": "government body or institution responsible"\n'
-        "  },\n"
-        '  "eligibility_and_coverage": ["array of eligibility criteria and coverage details"],\n'
-        '  "healthcare_benefits": ["array of healthcare benefits or services covered"],\n'
-        '  "operational_workflow": ["array of step-by-step operational procedures"],\n'
-        '  "stakeholders_and_roles": [\n'
-        "    {\n"
-        '      "role": "stakeholder role name",\n'
-        '      "responsibilities": ["array of responsibilities for this role"]\n'
-        "    }\n"
-        "  ],\n"
-        '  "community_impact": ["array of community impact points"],\n'
-        '  "policy_insights": ["array of 4-6 concise policy insights, implications, or recommendations"],\n'
-        '  "key_contacts": [\n'
-        "    {\n"
-        '      "service": "service or department name",\n'
-        '      "contact": "contact information (phone, email, helpline, etc.)"\n'
-        "    }\n"
-        "  ],\n"
-        '  "frequently_asked_questions": [\n'
-        "    {\n"
-        '      "question": "common question",\n'
-        '      "answer": "concise answer"\n'
-        "    }\n"
-        "  ],\n"
-        '  "summary": "comprehensive summary (8-12 sentences) in plain language"\n'
-        "}\n\n"
-        "Important:\n"
-        "- If a section is not applicable or not found in the document, return an empty array [] or empty string \"\"\n"
-        "- Do not make up information that is not in the document\n"
-        "- The JSON must be the ONLY thing in your reply. No markdown, no explanations outside the JSON.\n\n"
-        "Document Text:\n"
-        f"{text}\n"
-    )
+    prompt = f"""
+You are an expert government policy analyst.
+
+Analyze the following government document and generate a detailed structured analysis.
+
+Document Text:
+{text}
+
+Generate the following sections:
+
+1. Document Overview
+   Write a detailed explanation (120–150 words) describing the purpose of the document,
+   its scope, and what the document is trying to achieve.
+
+2. Summary
+   Generate a detailed and informative summary (150–250 words).
+   
+   The summary should include:
+   
+   • What the scheme/document is about
+   • Who it benefits
+   • Key features and coverage
+   • Operational structure or workflow
+   • Why it matters for society or public policy
+   
+   The summary should be written clearly so that a reader can understand the entire document without reading the original PDF.
+   
+   Avoid repeating bullet points. Write a structured paragraph explanation.
+
+3. Scheme Facts (REQUIRED)
+   Extract the following structured scheme information if present in the document:
+   
+   {{
+     "scheme_name": "",
+     "launch_year": "",
+     "coverage_amount": "",
+     "beneficiaries": "",
+     "target_population": "",
+     "institution": ""
+   }}
+   
+   Rules:
+   * If the document clearly mentions the scheme name, populate scheme_name.
+   * If launch year is mentioned, populate launch_year.
+   * If coverage amount like ₹5 lakh is mentioned, populate coverage_amount.
+   * If the scheme serves a specific number of beneficiaries, populate beneficiaries.
+   * If the document targets poor families or a defined group, populate target_population.
+   * If a ministry or government body runs the scheme, populate institution.
+   
+   IMPORTANT: Always include scheme_facts in your response, even if some fields are empty.
+   Extract all available information from the document.
+
+4. Community Impact
+   Provide 4–6 bullet points explaining how the scheme or policy benefits citizens.
+
+5. Policy Insights
+   Provide 4–6 key insights about implementation, governance, and policy significance.
+
+6. Eligibility and Coverage
+   Extract eligibility conditions and benefits.
+
+7. Operational Workflow
+   Describe step-by-step how the scheme operates.
+
+8. Key Contacts
+   Extract phone numbers, emails, and organizations mentioned.
+
+Return the result strictly as JSON with keys:
+
+document_overview
+summary
+scheme_facts
+community_impact
+policy_insights
+eligibility_and_coverage
+operational_workflow
+key_contacts
+"""
+    return prompt
 
 
 def _ensure_list(value: Any) -> List[str]:
@@ -145,7 +173,44 @@ def _ensure_faq_list(value: Any) -> List[Dict[str, Any]]:
     return result
 
 
-def analyze_document(text: str) -> Dict[str, Any]:
+SUPPORTED_LANGUAGES = {
+    "en",
+    "hi",
+    "mr",
+    "ta",
+    "te",
+    "bn",
+    "gu",
+    "kn",
+    "ml",
+    "pa",
+}
+
+
+def translate_text(text: str, target_language: str) -> str:
+    """
+    Translate text from English to the target language using AWS Translate.
+    """
+    if not text or target_language == "en":
+        return text
+
+    if target_language not in SUPPORTED_LANGUAGES:
+        logger.warning("Unsupported target language for translation: %s", target_language)
+        return text
+
+    try:
+        response = translate.translate_text(
+            Text=text,
+            SourceLanguageCode="en",
+            TargetLanguageCode=target_language,
+        )
+        return response.get("TranslatedText", text)
+    except Exception as e:
+        logger.error("Translation failed for language=%s: %s", target_language, str(e), exc_info=True)
+        return text
+
+
+def analyze_document(text: str, language: str = "en") -> Dict[str, Any]:
     """
     Analyze a cleaned document and return structured intelligence report with:
     - document_overview
@@ -226,7 +291,7 @@ def analyze_document(text: str) -> Dict[str, Any]:
         frequently_asked_questions = _ensure_faq_list(data.get("frequently_asked_questions", []))
         summary = str(data.get("summary", "")).strip()
 
-        return {
+        analysis: Dict[str, Any] = {
             "document_overview": document_overview,
             "scheme_facts": scheme_facts,
             "eligibility_and_coverage": eligibility_and_coverage,
@@ -240,6 +305,37 @@ def analyze_document(text: str) -> Dict[str, Any]:
             "summary": summary,
         }
 
+        # Apply translation if requested and supported
+        if language and language != "en":
+            logger.info("Translating analysis to language=%s using AWS Translate", language)
+            try:
+                analysis["document_overview"] = translate_text(
+                    analysis.get("document_overview", ""), language
+                )
+                analysis["summary"] = translate_text(
+                    analysis.get("summary", ""), language
+                )
+                analysis["community_impact"] = [
+                    translate_text(item, language)
+                    for item in analysis.get("community_impact", [])
+                ]
+                analysis["policy_insights"] = [
+                    translate_text(item, language)
+                    for item in analysis.get("policy_insights", [])
+                ]
+                analysis["eligibility_and_coverage"] = [
+                    translate_text(item, language)
+                    for item in analysis.get("eligibility_and_coverage", [])
+                ]
+                analysis["operational_workflow"] = [
+                    translate_text(item, language)
+                    for item in analysis.get("operational_workflow", [])
+                ]
+            except Exception as e:
+                logger.error("Failed to translate analysis to language=%s: %s", language, str(e), exc_info=True)
+
+        return analysis
+
     except Exception as e:
         logger.error("Document analysis failed: %s", str(e), exc_info=True)
         # Fallback: simple heuristic summary
@@ -248,7 +344,7 @@ def analyze_document(text: str) -> Dict[str, Any]:
         if summary and not summary.endswith("."):
             summary += "."
 
-        return {
+        analysis: Dict[str, Any] = {
             "document_overview": summary[:200] if summary else "",
             "scheme_facts": {
                 "scheme_name": "",
@@ -268,4 +364,23 @@ def analyze_document(text: str) -> Dict[str, Any]:
             "frequently_asked_questions": [],
             "summary": summary or text[:500],
         }
+
+        # Translate fallback analysis if a non-English language is requested
+        if language and language != "en":
+            logger.info("Translating fallback analysis to language=%s using AWS Translate", language)
+            try:
+                analysis["document_overview"] = translate_text(
+                    analysis.get("document_overview", ""), language
+                )
+                analysis["summary"] = translate_text(
+                    analysis.get("summary", ""), language
+                )
+                analysis["eligibility_and_coverage"] = [
+                    translate_text(item, language)
+                    for item in analysis.get("eligibility_and_coverage", [])
+                ]
+            except Exception as e:
+                logger.error("Failed to translate fallback analysis to language=%s: %s", language, str(e), exc_info=True)
+
+        return analysis
 

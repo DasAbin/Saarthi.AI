@@ -47,7 +47,10 @@ export async function checkJobStatus(jobId: string): Promise<PDFProcessResponse>
  * For PDFs, this starts an async job and returns a jobId.
  * For images, this processes synchronously and returns the result.
  */
-export async function processPDF(file: File): Promise<PDFProcessResponse | { jobId: string; status: string }> {
+export async function processPDF(
+  file: File,
+  language: string = "en"
+): Promise<PDFProcessResponse | { jobId: string; status: string }> {
   // Validate file size before processing
   if (file.size > MAX_FILE_SIZE) {
     throw new Error(`File size must be less than ${MAX_FILE_SIZE / 1024 / 1024}MB`);
@@ -74,13 +77,13 @@ export async function processPDF(file: File): Promise<PDFProcessResponse | { job
     }
 
     // 3) Trigger processing
-    const response = await apiClient.post<PDFProcessResponse | { jobId: string; status: string }>(
-      "/pdf",
-      {
-        s3Key: key,
-        filename: file.name,
-      }
-    );
+    const response = await apiClient.post<
+      PDFProcessResponse | { jobId: string; status: string }
+    >("/pdf", {
+      s3Key: key,
+      filename: file.name,
+      language,
+    });
 
     if (!response.success || !response.data) {
       throw new Error(response.message || "Failed to process document");

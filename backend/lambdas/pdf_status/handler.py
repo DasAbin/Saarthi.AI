@@ -148,6 +148,7 @@ def handler(event: Dict[str, Any], context: Any) -> Dict[str, Any]:
         file_extension = job_meta.get("file_extension", "pdf")
         textract_job_id = job_meta["textract_job_id"]
         job_type = job_meta.get("job_type", "async")
+        language = job_meta.get("language", "en")
 
         # ── Handle async PDF job ────────────────────────────────────────
         if job_type == "async":
@@ -211,8 +212,12 @@ def handler(event: Dict[str, Any], context: Any) -> Dict[str, Any]:
 
         # ── Bedrock analysis ────────────────────────────────────────────
         analysis_text = cleaned_text[:5000]
-        logger.info("Running Bedrock analysis on %d characters", len(analysis_text))
-        analysis = analyze_document(analysis_text)
+        logger.info(
+            "Running Bedrock analysis on %d characters (language=%s)",
+            len(analysis_text),
+            language,
+        )
+        analysis = analyze_document(analysis_text, language=language)
 
         # ── Build final payload ─────────────────────────────────────────
         payload = _build_full_payload(

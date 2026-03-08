@@ -79,6 +79,7 @@ def handler(event: Dict[str, Any], context: Any) -> Dict[str, Any]:
 
         s3_key = body.get("s3Key")
         filename = body.get("filename") or "document.pdf"
+        language = body.get("language", "en")
 
         if not s3_key:
             logger.warning("Missing 's3Key' in request body")
@@ -87,7 +88,7 @@ def handler(event: Dict[str, Any], context: Any) -> Dict[str, Any]:
                 error_response("Field 's3Key' is required"),
             )
 
-        logger.info("Processing document from S3: key=%s filename=%s", s3_key, filename)
+        logger.info("Processing document from S3: key=%s filename=%s language=%s", s3_key, filename, language)
 
         # Step 0: Validate file type before processing
         # IMPORTANT: Do NOT rely on HTTP Content-Type headers for validation.
@@ -144,7 +145,7 @@ def handler(event: Dict[str, Any], context: Any) -> Dict[str, Any]:
 
         # Generate a unique document_id/jobId for this processing job
         document_id = f"doc-{uuid.uuid4().hex[:16]}"
-        logger.info("Generated document_id=%s for s3_key=%s", document_id, s3_key)
+        logger.info("Generated document_id=%s for s3_key=%s language=%s", document_id, s3_key, language)
 
         # Step 1: Start async Textract job for PDFs (images can use sync)
         # For PDFs, use async Textract to avoid Lambda timeout
@@ -180,6 +181,7 @@ def handler(event: Dict[str, Any], context: Any) -> Dict[str, Any]:
                     "textract_job_id": textract_job_id,
                     "job_type": "async",
                     "status": "processing",
+                    "language": language,
                 }
                 meta_key = f"jobs/{document_id}/meta.json"
                 s3_client.put_object(
@@ -212,9 +214,10 @@ def handler(event: Dict[str, Any], context: Any) -> Dict[str, Any]:
         
         # For images, use synchronous Textract (existing flow)
         logger.info(
-            "Starting sync Textract extraction for image - extension=%s s3_key=%s",
+            "Starting sync Textract extraction for image - extension=%s s3_key=%s language=%s",
             file_extension,
             s3_key,
+            language,
         )
         try:
             extracted_text = extract_text_with_textract(PDF_BUCKET, s3_key)
@@ -341,7 +344,7 @@ def handler(event: Dict[str, Any], context: Any) -> Dict[str, Any]:
             "Sending %d characters to Bedrock for analysis",
             len(analysis_text),
         )
-        analysis = analyze_document(analysis_text)
+        analysis = analyze_document(analysis_text, language=language)
 
         logger.info("PDF processing and analysis completed successfully")
 
