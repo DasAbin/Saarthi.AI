@@ -23,22 +23,20 @@ import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { LoadingSpinner } from "@/components/common/LoadingSpinner";
 import { ErrorMessage } from "@/components/common/ErrorMessage";
 import { processPDF, checkJobStatus } from "@/lib/api/pdf";
+import { generateSpeech } from "@/lib/api/tts";
 import { useToast } from "@/components/ui/use-toast";
 import type { PDFProcessResponse } from "@/lib/types";
 import { MAX_FILE_SIZE, ALLOWED_PDF_TYPES } from "@/lib/utils/constants";
 
-const LANGUAGES: Record<string, string> = {
-  en: "English",
-  hi: "Hindi",
-  mr: "Marathi",
-  ta: "Tamil",
-  te: "Telugu",
-  bn: "Bengali",
-  gu: "Gujarati",
-  kn: "Kannada",
-  ml: "Malayalam",
-  pa: "Punjabi",
-};
+const LANGUAGES: { label: string; value: string }[] = [
+  { label: "English", value: "en" },
+  { label: "Hindi", value: "hi" },
+  { label: "Marathi (Hindi Voice)", value: "mr" },
+  { label: "Tamil", value: "ta" },
+  { label: "Telugu", value: "te" },
+  { label: "Bengali (Hindi Voice)", value: "bn" },
+  { label: "Malayalam (Hindi Voice)", value: "ml" },
+];
 
 export default function PDFPage() {
   const [file, setFile] = useState<File | null>(null);
@@ -49,6 +47,8 @@ export default function PDFPage() {
   const [jobId, setJobId] = useState<string | null>(null);
   const [polling, setPolling] = useState(false);
   const [selectedLanguage, setSelectedLanguage] = useState<string>("en");
+  const [audioLoading, setAudioLoading] = useState(false);
+  const [audioInstance, setAudioInstance] = useState<HTMLAudioElement | null>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
   const { toast } = useToast();
 
@@ -194,6 +194,40 @@ export default function PDFPage() {
     URL.revokeObjectURL(url);
   };
 
+  const playAudio = async () => {
+    if (!result?.summary) return;
+
+    try {
+      setAudioLoading(true);
+
+      const speechText = `Here is a summary of the document. ${result.summary}`;
+
+      const audioBlob = await generateSpeech(
+        speechText,
+        selectedLanguage
+      );
+
+      const audioUrl = URL.createObjectURL(audioBlob);
+      const audio = new Audio(audioUrl);
+
+      setAudioInstance(audio);
+
+      audio.play();
+    } catch (err) {
+      console.error(err);
+    } finally {
+      setAudioLoading(false);
+    }
+  };
+
+  const stopAudio = () => {
+    if (audioInstance) {
+      audioInstance.pause();
+      audioInstance.currentTime = 0;
+      setAudioInstance(null);
+    }
+  };
+
   const toggleFaq = (index: number) => {
     const newExpanded = new Set(expandedFaqs);
     if (newExpanded.has(index)) {
@@ -205,7 +239,7 @@ export default function PDFPage() {
   };
 
   return (
-    <div className="w-full max-w-[1100px] mx-auto px-6 py-6">
+    <div className="w-full max-w-[950px] mx-auto px-6 py-6">
       <div className="mb-8">
         <div className="flex items-center justify-between mb-2">
           <h1 className="text-3xl font-bold">Document Analyzer</h1>
@@ -217,9 +251,9 @@ export default function PDFPage() {
               onChange={(e) => handleLanguageChange(e.target.value)}
               className="border rounded-md px-2 py-1 text-sm bg-background text-foreground shadow-sm"
             >
-              {Object.entries(LANGUAGES).map(([code, name]) => (
-                <option key={code} value={code}>
-                  {name}
+              {LANGUAGES.map((lang) => (
+                <option key={lang.value} value={lang.value}>
+                  {lang.label}
                 </option>
               ))}
             </select>
@@ -303,7 +337,7 @@ export default function PDFPage() {
       )}
 
       {result && (
-        <div className="space-y-6 max-w-[1100px] mx-auto">
+        <div className="space-y-6 max-w-[950px] mx-auto">
           {/* Document Overview */}
           <Card className="shadow-sm" style={{ padding: '24px', borderRadius: '12px' }}>
             <CardHeader className="p-0 pb-4">
@@ -576,8 +610,27 @@ export default function PDFPage() {
             <CardHeader className="p-0 pb-4">
               <CardTitle className="flex items-center gap-2 text-lg">
                 <CheckCircle2 className="h-5 w-5 text-emerald-600" />
-                Summary
+                <span>Summary</span>
               </CardTitle>
+              <div className="text-xs text-muted-foreground mb-2">
+                Audio language: {selectedLanguage.toUpperCase()}
+              </div>
+              <div className="flex gap-3 mt-3">
+                <Button
+                  variant="outline"
+                  onClick={playAudio}
+                  disabled={audioLoading}
+                >
+                  {audioLoading ? "Generating Audio..." : "▶ Listen"}
+                </Button>
+                <Button
+                  variant="outline"
+                  onClick={stopAudio}
+                  disabled={!audioInstance}
+                >
+                  ⏹ Stop
+                </Button>
+              </div>
             </CardHeader>
             <CardContent className="p-0">
               <p className="text-foreground whitespace-pre-wrap">

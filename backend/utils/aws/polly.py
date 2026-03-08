@@ -23,13 +23,19 @@ VOICE_MAP = {
     "en": "Joanna",  # Female, US English
     "hi": "Aditi",   # Female, Hindi
     "mr": "Aditi",   # Marathi uses Hindi voice (Aditi supports both)
+    "ta": "Valli",   # Tamil
+    "te": "Vani",    # Telugu (if unsupported, Polly will fall back)
+    "bn": "Aditi",   # Bengali approximation via Aditi
 }
 
 # Language code mapping
 LANGUAGE_CODE_MAP = {
     "en": "en-US",
     "hi": "hi-IN",
-    "mr": "hi-IN",  # Marathi uses Hindi language code
+    "mr": "hi-IN",   # Marathi uses Hindi language code
+    "ta": "ta-IN",
+    "te": "te-IN",
+    "bn": "bn-IN",
 }
 
 
