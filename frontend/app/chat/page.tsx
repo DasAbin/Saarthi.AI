@@ -90,107 +90,123 @@ function ChatContent() {
   };
 
   return (
-    <div className="container py-8">
-      <div className="mx-auto max-w-4xl">
-        <div className="mb-8">
-          <h1 className="text-3xl font-bold mb-2">Ask AI</h1>
-          <p className="text-muted-foreground">
-            Get answers about government schemes and policies
-          </p>
-        </div>
-
-        <LanguageSelector value={language} onChange={setLanguage} className="mb-6" />
-
-        <form onSubmit={handleSubmit} className="space-y-4 mb-6">
-          <Textarea
-            placeholder={
-              language === "hi"
-                ? "सरकारी योजनाओं के बारे में पूछें..."
-                : language === "mr"
-                  ? "सरकारी योजनांबद्दल विचारा..."
-                  : "Ask about government schemes..."
-            }
-            value={input}
-            onChange={(e) => setInput(e.target.value)}
-            className="min-h-[120px]"
-            disabled={loading}
-          />
-          <Button type="submit" disabled={loading || !input.trim()}>
-            {loading ? (
-              <>
-                <Loader2 className="mr-2 h-4 w-4 animate-spin" />
-                Processing...
-              </>
-            ) : (
-              <>
-                <Send className="mr-2 h-4 w-4" />
-                Ask
-              </>
-            )}
-          </Button>
-        </form>
-
-        {error && <ErrorMessage message={error} className="mb-6" />}
-
-        {loading && (
-          <div className="flex justify-center py-8">
-            <LoadingSpinner size="lg" />
+    <div className="flex flex-col min-h-screen">
+      <main className="flex-1 overflow-y-auto p-6 space-y-4">
+        <div className="mx-auto max-w-4xl w-full">
+          <div className="mb-8">
+            <h1 className="text-3xl font-bold mb-2">Ask AI</h1>
+            <p className="text-muted-foreground">
+              Get answers about government schemes and policies
+            </p>
           </div>
-        )}
 
-        {messages.length > 0 && (
-          <div className="max-h-[500px] overflow-y-auto p-4 mt-6">
-            <div className="flex flex-col gap-4 mt-6">
+          <LanguageSelector value={language} onChange={setLanguage} className="mb-6" />
+
+          {error && <ErrorMessage message={error} className="mb-6" />}
+
+          {messages.length > 0 && (
+            <div className="flex flex-col gap-4">
               {messages.map((msg, i) => (
-                <div
-                  key={i}
-                  className={
+                <div key={i} className={`flex ${msg.role === "user" ? "justify-end" : "justify-start"}`}>
+                  <div className={
                     msg.role === "user"
-                      ? "bg-blue-100 rounded-xl p-4 ml-auto max-w-2xl shadow-sm"
-                      : "bg-gray-100 rounded-xl p-4 max-w-2xl shadow-sm"
-                  }
-                >
-                  <div className="text-sm font-medium mb-1">
-                    {msg.role === "user" ? "You" : "AI Assistant"}
-                  </div>
-                  <div className="text-sm whitespace-pre-wrap">
-                    {msg.role === "assistant" ? (
-                      <ReactMarkdown
-                        remarkPlugins={[remarkGfm]}
-                        components={{
-                          h1: ({ ...props }) => (
-                            <h1 className="text-xl font-bold mb-2" {...props} />
-                          ),
-                          h2: ({ ...props }) => (
-                            <h2 className="text-lg font-semibold mb-2" {...props} />
-                          ),
-                          h3: ({ ...props }) => (
-                            <h3 className="font-semibold mb-1" {...props} />
-                          ),
-                          strong: ({ ...props }) => (
-                            <strong className="font-semibold" {...props} />
-                          ),
-                          ul: ({ ...props }) => (
-                            <ul className="list-disc ml-6" {...props} />
-                          ),
-                          li: ({ ...props }) => (
-                            <li className="mb-1" {...props} />
-                          ),
-                        }}
-                      >
-                        {msg.content}
-                      </ReactMarkdown>
-                    ) : (
-                      msg.content
-                    )}
+                      ? "bg-blue-100 p-3 rounded-lg max-w-md ml-auto"
+                      : "bg-gray-100 p-4 rounded-lg max-w-2xl"
+                  }>
+                    <div className="text-sm font-medium mb-1">
+                      {msg.role === "user" ? "You" : "Saarthi AI"}
+                    </div>
+                    <div className="text-sm whitespace-pre-wrap">
+                      {msg.role === "assistant" ? (
+                        <>
+                          <ReactMarkdown
+                            remarkPlugins={[remarkGfm]}
+                            components={{
+                              h1: ({ ...props }) => <h1 className="text-xl font-bold mb-2 mt-4" {...props} />,
+                              h2: ({ ...props }) => <h2 className="text-lg font-semibold mb-2 mt-4" {...props} />,
+                              h3: ({ ...props }) => <h3 className="font-semibold mb-1 mt-3" {...props} />,
+                              strong: ({ ...props }) => <strong className="font-semibold" {...props} />,
+                              ul: ({ ...props }) => <ul className="list-disc ml-6 mt-2 mb-2" {...props} />,
+                              li: ({ ...props }) => <li className="mb-1" {...props} />,
+                              p: ({ ...props }) => <p className="mb-2" {...props} />,
+                            }}
+                          >
+                            {msg.content}
+                          </ReactMarkdown>
+                          {msg.confidence !== undefined && (
+                            <div className="mt-3 text-xs text-gray-500 font-medium">
+                              Confidence: {msg.confidence}%
+                            </div>
+                          )}
+                        </>
+                      ) : (
+                        msg.content
+                      )}
+                    </div>
                   </div>
                 </div>
               ))}
+              {loading && (
+                <div className="flex justify-start">
+                  <div className="text-gray-500 italic">
+                    Saarthi is analyzing your question...
+                  </div>
+                </div>
+              )}
               <div ref={messagesEndRef} />
             </div>
-          </div>
-        )}
-      </div>
+          )}
+        </div>
+      </main>
+
+      <footer className="border-t bg-white p-4 sticky bottom-0 z-10">
+        <div className="mx-auto max-w-4xl w-full">
+          <form onSubmit={handleSubmit} className="space-y-4">
+            <Textarea
+              placeholder={
+                language === "hi"
+                  ? "सरकारी योजनाओं के बारे में पूछें..."
+                  : language === "mr"
+                    ? "सरकारी योजनांबद्दल विचारा..."
+                    : "Ask about government schemes..."
+              }
+              value={input}
+              onChange={(e) => setInput(e.target.value)}
+              className="min-h-[80px]"
+              disabled={loading}
+              onKeyDown={(e) => {
+                if (e.key === 'Enter' && !e.shiftKey) {
+                  e.preventDefault();
+                  handleSubmit(e);
+                }
+              }}
+            />
+            <div className="flex md:flex-row flex-col justify-between items-start gap-4">
+              <div className="text-sm text-gray-500">
+                <p className="font-medium mb-1">Try asking:</p>
+                <ul className="list-disc pl-4 space-y-1">
+                  <li>What is PM SHRI scheme?</li>
+                  <li>Who is eligible for Ayushman Bharat?</li>
+                  <li>Scholarships available for students in India</li>
+                </ul>
+              </div>
+              <Button type="submit" disabled={loading || !input.trim()}>
+                {loading ? (
+                  <>
+                    <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+                    Processing...
+                  </>
+                ) : (
+                  <>
+                    <Send className="mr-2 h-4 w-4" />
+                    Ask
+                  </>
+                )}
+              </Button>
+            </div>
+          </form>
+        </div>
+      </footer>
     </div>
   );
 }

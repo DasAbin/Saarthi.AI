@@ -18,12 +18,16 @@ export default function Home() {
 
             <h1 className="text-4xl font-extrabold tracking-tight text-slate-900 sm:text-5xl lg:text-6xl">
               Saarthi.AI
-              <span className="block text-indigo-600 mt-2">
-                Your AI-Powered Public Service Assistant
+              <span className="block text-indigo-600 mt-2 text-3xl sm:text-4xl">
+                Your AI Guide to Government Schemes
               </span>
             </h1>
 
-            <p className="mt-6 text-lg text-slate-600 max-w-2xl mx-auto">
+            <p className="mt-4 text-lg font-medium text-slate-700">
+              Powered by Amazon Bedrock
+            </p>
+
+            <p className="mt-4 text-md text-slate-600 max-w-2xl mx-auto">
               Access government schemes, understand policies, analyze documents,
               and file grievances—all in your language, powered by AI.
             </p>
