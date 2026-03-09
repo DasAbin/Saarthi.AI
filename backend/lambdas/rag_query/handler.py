@@ -90,6 +90,11 @@ def handler(event: Dict[str, Any], context: Any) -> Dict[str, Any]:
         user_id: str = body.get("user_id") or event.get("requestContext", {}).get("identity", {}).get("user", "") or "anonymous"
         session_id: str = body.get("session_id") or event.get("headers", {}).get("x-session-id", "") or "default"
         
+        # Detect voice mode from path or body flag
+        voice_mode = body.get("voice_mode", False)
+        if event.get("path", "").endswith("/stt") or event.get("path", "").endswith("/voice"):
+            voice_mode = True
+        
         if not query:
             logger.warning("Empty query received")
             return lambda_response(
@@ -115,28 +120,15 @@ def handler(event: Dict[str, Any], context: Any) -> Dict[str, Any]:
 
         language_name = {"en": "English", "hi": "Hindi", "mr": "Marathi"}[language]
 
-        # Build LLM query that includes recent conversation history (if any)
-        llm_query = query
-        if history:
-            try:
-                history_lines = []
-                # Only keep the last few turns to keep prompt size under control
-                for m in history[-6:]:
-                    role = m.get("role", "user")
-                    prefix = "Citizen" if role == "user" else "Assistant"
-                    content = m.get("content", "")
-                    history_lines.append(f"{prefix}: {content}")
-                history_block = "\n".join(history_lines)
-                llm_query = (
-                    "Conversation so far:\n"
-                    f"{history_block}\n\n"
-                    f"Latest question from the citizen:\n{query}"
-                )
-            except Exception as hist_err:
-                logger.warning("Failed to process history for LLM query: %s", str(hist_err))
-                llm_query = query
-        # Cache key includes query, language, and optional document_id
-        q_hash = make_query_hash(query, language, document_id)
+        messages = body.get("messages", [])
+        if not messages and history:
+            messages = history
+            
+        conversation = ""
+        if messages:
+            conversation = "\n".join([m.get("content", "") for m in messages[-6:]])
+        # Cache key includes query, language, optional document_id, and voice_mode
+        q_hash = make_query_hash(query, language, document_id, voice_mode)
         cached = get_cached_response(q_hash)
         if cached:
             logger.info("Returning cached response for hash %s", q_hash[:8])
@@ -178,96 +170,147 @@ def handler(event: Dict[str, Any], context: Any) -> Dict[str, Any]:
                 logger.warning("Failed to compute max score from chunks: %s", str(score_err))
                 max_score = 0.0
 
-        # Build a ChatGPT-style prompt, with or without document context depending on retrieval strength.
-        question = llm_query
+        # Web Search Fallback
+        if not top_chunks or max_score < 0.55:
+            try:
+                from tavily import TavilyClient
+                tavily_api_key = os.environ.get("TAVILY_API_KEY", "")
+                if tavily_api_key:
+                    client = TavilyClient(api_key=tavily_api_key)
+                    search_result = client.search(query=query, search_depth="basic")
+                    if search_result and search_result.get("results"):
+                        for res in search_result["results"]:
+                            top_chunks.append({
+                                "text": res.get("content", ""),
+                                "source": res.get("title", "Web Search"),
+                                "url": res.get("url", ""),
+                                "score": 0.8
+                            })
+                        max_score = max(max_score, 0.8)
+            except Exception as e:
+                logger.warning(f"Tavily search failed: {e}")
 
-        if not top_chunks or max_score < 0.6:
+        question = query
+        
+        confidence = round(min(0.95, max_score + 0.3) * 100, 1) if max_score > 0 else 30.0
+
+        if not top_chunks or max_score < 0.55:
             # Weak or no document context: answer using model's general knowledge.
-            prompt = f"""
-You are an expert assistant explaining Indian government schemes clearly.
+            prompt = f"""You are Saarthi, an AI assistant designed to help citizens understand Indian government schemes clearly.
+
+Rules:
+- Provide factual information only.
+- Do not invent scheme details.
+- Always respond in structured format.
+- Use bullet points when possible.
+- Answer using your general knowledge since document context is missing.
+- When suggesting resources, strongly prefer: scholarships.gov.in, education.gov.in, AICTE, UGC, or state scholarship portals.
+{"- Provide conversational yet detailed explanations." if voice_mode else ""}
+
+Response Format:
+
+## Overview
+Explain what the scheme is.
+
+## Eligibility
+List eligibility criteria clearly.
+
+## Benefits
+Explain financial or social benefits.
+
+## Application Process
+Provide step-by-step process.
+
+## Important Notes
+Mention deadlines, conditions or special rules.
+
+## Official Website
+Provide a government website link if available.
+
+Conversation History:
+{conversation if conversation else "None"}
 
 User Question:
 {question}
 
-Provide a detailed answer using your knowledge.
+Retrieved Context:
+None available.
 
-Structure the response with:
-
-Overview
-Eligibility
-Benefits
-Application Process
-Important Notes
-
-If the scheme is not widely known, still provide helpful information.
+Generate a clear structured answer.
 """
 
             answer = generate_general_answer(prompt)
+            fallback_text = "\n\n*Note: This information is based on general knowledge and may require verification from official government websites.*"
+            if "verification from official government websites" not in answer:
+                answer += fallback_text
+
             success_payload = {
                 "answer": answer.strip(),
                 "sources": [],
-                "confidence": 65.0,
+                "confidence": confidence,
             }
         else:
-            # Strong document context available: behave like ChatGPT with RAG assistance.
+            # Strong document context available
             context_text = "\n\n".join([chunk.get("text", "") for chunk in top_chunks])
 
-            prompt = f"""
-You are an expert assistant explaining Indian government schemes clearly.
+            prompt = f"""You are Saarthi, an AI assistant designed to help citizens understand Indian government schemes clearly.
 
-Use the following document context to answer the question. If the context is not sufficient, use your general knowledge as well.
+Rules:
+- Provide factual information only.
+- Do not invent scheme details.
+- If the information is not present in the retrieved context, say:
+  "Information not found in available policy documents."
+- Always respond in structured format.
+- Use bullet points when possible.
+{"- Provide conversational yet detailed explanations." if voice_mode else ""}
 
-Context:
-{context_text}
+Response Format:
+
+## Overview
+Explain what the scheme is.
+
+## Eligibility
+List eligibility criteria clearly.
+
+## Benefits
+Explain financial or social benefits.
+
+## Application Process
+Provide step-by-step process.
+
+## Important Notes
+Mention deadlines, conditions or special rules.
+
+## Official Website
+Provide a government website link if available.
+
+Conversation History:
+{conversation if conversation else "None"}
 
 User Question:
 {question}
 
-Provide a detailed answer.
+Retrieved Context:
+{context_text}
 
-Structure the response with:
-
-Overview
-Eligibility
-Benefits
-Application Process
-Important Notes
-
-If the scheme is not widely known, still provide helpful information.
+Generate a clear structured answer.
 """
 
             answer = generate_general_answer(prompt)
 
-            # Build clean, de-duplicated source metadata (no raw text)
+            # Build clean, de-duplicated source metadata
             sources = []
+            seen_titles = set()
             for chunk in top_chunks:
-                document_name = (
-                    chunk.get("document_name")
-                    or chunk.get("source")
-                    or chunk.get("metadata", {}).get("document_id")
-                    or "Unknown document"
-                )
-                page = chunk.get("page", "unknown")
-                score = round(float(chunk.get("score", 0.0)), 2)
-                sources.append(
-                    {
-                        "document": document_name,
-                        "page": page,
-                        "score": score,
-                    }
-                )
-
-            # Remove duplicate (document, page) entries
-            dedup_map = {(s["document"], s["page"]): s for s in sources}
-            sources = list(dedup_map.values())
-
-            # Confidence based on average retrieval score (0–100)
-            if top_chunks:
-                raw_scores = [float(c.get("score", 0.0)) for c in top_chunks]
-                avg_score = sum(raw_scores) / len(raw_scores)
-                confidence = round(avg_score * 100.0, 1)
-            else:
-                confidence = 0.0
+                title = chunk.get("source") or chunk.get("document_name") or chunk.get("metadata", {}).get("document_id") or "Policy Document"
+                url = chunk.get("url") or "#"
+                if title not in seen_titles:
+                    seen_titles.add(title)
+                    sources.append({
+                        "title": title,
+                        "url": url
+                    })
+            sources = sources[:3]
 
             success_payload = {
                 "answer": answer.strip(),

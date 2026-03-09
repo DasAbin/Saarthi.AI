@@ -37,16 +37,16 @@ def _get_table():
     return _dynamodb.Table(_CACHE_TABLE_NAME)
 
 
-def make_query_hash(query: str, language: str, document_id: Optional[str]) -> str:
+def make_query_hash(query: str, language: str, document_id: Optional[str], voice_mode: bool = False) -> str:
     """
-    Create a stable hash for (query, language, document_id).
+    Create a stable hash for (query, language, document_id, voice_mode).
 
     Normalises query with strip + lower so "PMAY" and "pmay" map to the
-    same cache entry.
+    same cache entry. Voice mode gets a unique cache pool to avoid mixing response lengths.
     """
     key = json.dumps(
         # FIX: .strip().lower() ensures case-insensitive cache hits
-        {"q": query.strip().lower(), "lang": language, "doc": document_id or ""},
+        {"q": query.strip().lower(), "lang": language, "doc": document_id or "", "voice": voice_mode},
         sort_keys=True,
         ensure_ascii=False,
     )

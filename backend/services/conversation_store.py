@@ -69,7 +69,7 @@ def append_conversation_event(
 
     item: Dict[str, Any] = {
         "session_id": session_id,
-        "event_id": event_id,
+        "timestamp": event_id,
         "user_id": user_id,
         "query": query,
         "response": response,

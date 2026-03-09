@@ -2,6 +2,8 @@ import boto3
 
 polly = boto3.client("polly")
 
+import re
+
 VOICE_CONFIG = {
     "en": {
         "voice": "Joanna",
@@ -33,6 +35,22 @@ VOICE_CONFIG = {
     },
 }
 
+def strip_markdown(text: str) -> str:
+    """
+    Remove common markdown symbols that Polly might read incorrectly.
+    """
+    # Remove headers (#)
+    text = re.sub(r'#+\s*', '', text)
+    # Remove bold/italic (**)
+    text = re.sub(r'\*+', '', text)
+    # Remove list markers (-)
+    text = re.sub(r'^\s*[-*+]\s+', ' ', text, flags=re.MULTILINE)
+    # Remove links [text](url) -> text
+    text = re.sub(r'\[([^\]]+)\]\([^\)]+\)', r'\1', text)
+    # Remove multiple spaces/newlines
+    text = re.sub(r'\s+', ' ', text).strip()
+    return text
+
 
 def synthesize_speech(text: str, language: str = "en") -> bytes:
     """
@@ -41,6 +59,7 @@ def synthesize_speech(text: str, language: str = "en") -> bytes:
     Uses a safe configuration with language-specific voices and
     falls back to English (Joanna) if Polly raises any error.
     """
+    text = strip_markdown(text)
     config = VOICE_CONFIG.get(language, VOICE_CONFIG["en"])
 
     try:
@@ -49,6 +68,7 @@ def synthesize_speech(text: str, language: str = "en") -> bytes:
             OutputFormat="mp3",
             VoiceId=config["voice"],
             LanguageCode=config["lang"],
+            Engine="neural"
         )
         return response["AudioStream"].read()
 
@@ -59,5 +79,6 @@ def synthesize_speech(text: str, language: str = "en") -> bytes:
             OutputFormat="mp3",
             VoiceId="Joanna",
             LanguageCode="en-US",
+            Engine="neural"
         )
         return response["AudioStream"].read()

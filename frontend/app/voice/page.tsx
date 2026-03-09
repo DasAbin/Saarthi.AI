@@ -1,7 +1,7 @@
 "use client";
 
 import { useState, useRef, useEffect } from "react";
-import { Mic, Loader2, Volume2, Square } from "lucide-react";
+import { Mic, Loader2, Volume2, Square, FileText, ExternalLink } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { LanguageSelector } from "@/components/common/LanguageSelector";
@@ -10,7 +10,39 @@ import { ErrorMessage } from "@/components/common/ErrorMessage";
 import { speechToText, textToSpeech } from "@/lib/api/voice";
 import { queryAI } from "@/lib/api/query";
 import { useToast } from "@/components/ui/use-toast";
-import type { Language } from "@/lib/types";
+import type { Language, QueryResponse } from "@/lib/types";
+import ReactMarkdown from "react-markdown";
+import remarkGfm from "remark-gfm";
+
+function TypingResponse({ content }: { content: string }) {
+  const [displayText, setDisplayText] = useState("");
+  useEffect(() => {
+    let i = 0;
+    const interval = setInterval(() => {
+      setDisplayText(content.slice(0, i));
+      i++;
+      if (i > content.length + 5) clearInterval(interval);
+    }, 15);
+    return () => clearInterval(interval);
+  }, [content]);
+
+  return (
+    <ReactMarkdown
+      remarkPlugins={[remarkGfm]}
+      components={{
+        h1: ({ ...props }) => <h1 className="text-xl font-bold mb-2 mt-4" {...props} />,
+        h2: ({ ...props }) => <h2 className="text-lg font-semibold mb-2 mt-4" {...props} />,
+        h3: ({ ...props }) => <h3 className="font-semibold mb-1 mt-3" {...props} />,
+        strong: ({ ...props }) => <strong className="font-semibold" {...props} />,
+        ul: ({ ...props }) => <ul className="list-disc ml-6 mt-2 mb-2" {...props} />,
+        li: ({ ...props }) => <li className="mb-1" {...props} />,
+        p: ({ ...props }) => <p className="mb-2" {...props} />,
+      }}
+    >
+      {displayText}
+    </ReactMarkdown>
+  );
+}
 
 function audioBufferToWav(audioBuffer: AudioBuffer): Blob {
   const numOfChan = audioBuffer.numberOfChannels;
@@ -93,6 +125,9 @@ export default function VoicePage() {
   const [isProcessing, setIsProcessing] = useState(false);
   const [transcript, setTranscript] = useState("");
   const [response, setResponse] = useState("");
+  const [sources, setSources] = useState<any[]>([]);
+  const [confidence, setConfidence] = useState<number | null>(null);
+  const [statusMessage, setStatusMessage] = useState("");
   const [isPlaying, setIsPlaying] = useState(false);
   const [language, setLanguage] = useState<Language>("en");
   const [error, setError] = useState<string | null>(null);
@@ -137,6 +172,7 @@ export default function VoicePage() {
 
       mediaRecorder.start();
       setIsRecording(true);
+      setStatusMessage("Saarthi is listening...");
       setTranscript("");
       setResponse("");
       setError(null);
@@ -163,6 +199,7 @@ export default function VoicePage() {
 
   const processAudio = async (audioBlob: Blob) => {
     setIsProcessing(true);
+    setStatusMessage("Saarthi is preparing your answer...");
     setError(null);
 
     try {
@@ -182,12 +219,15 @@ export default function VoicePage() {
       setTranscript(transcribedText);
 
       // Step 2: Query AI
-      const aiResponse = await queryAI({
+      const aiResponse: QueryResponse = await queryAI({
         query: transcribedText,
         language,
-      });
+        voice_mode: true,
+      } as any);
       const answer = aiResponse.answer;
       setResponse(answer);
+      setSources(aiResponse.sources || []);
+      setConfidence(aiResponse.confidence);
 
       // Step 3: Text to Speech
       const ttsResponse = await textToSpeech({
@@ -259,8 +299,8 @@ export default function VoicePage() {
                 <Button
                   size="lg"
                   className={`h-24 w-24 rounded-full ${isRecording
-                      ? "bg-destructive hover:bg-destructive/90 animate-pulse"
-                      : ""
+                    ? "bg-destructive hover:bg-destructive/90 animate-pulse"
+                    : ""
                     }`}
                   onClick={isRecording ? stopRecording : startRecording}
                   disabled={isProcessing}
@@ -278,14 +318,14 @@ export default function VoicePage() {
                 )}
               </div>
 
-              <div className="text-center">
+              <div className="text-center font-medium">
                 {isRecording && (
-                  <p className="text-destructive font-medium animate-pulse">
-                    Recording...
+                  <p className="text-destructive animate-pulse">
+                    {statusMessage || "Recording..."}
                   </p>
                 )}
                 {isProcessing && (
-                  <p className="text-primary font-medium">Processing...</p>
+                  <p className="text-primary">{statusMessage || "Processing..."}</p>
                 )}
                 {!isRecording && !isProcessing && (
                   <p className="text-muted-foreground">
@@ -337,9 +377,39 @@ export default function VoicePage() {
               </div>
             </CardHeader>
             <CardContent>
-              <p className="text-foreground mb-4">{response}</p>
+              <div className="text-foreground mb-4">
+                <TypingResponse content={response} />
+              </div>
+
+              {sources && sources.length > 0 && (
+                <div className="mt-4 border-t border-gray-200 pt-4">
+                  <div className="text-sm font-medium mb-3 text-gray-700">Sources</div>
+                  <div className="flex flex-col gap-2">
+                    {sources.map((source: any, idx) => (
+                      <div key={idx} className="border rounded-lg p-3 bg-white shadow-sm flex items-center justify-between">
+                        <div className="flex items-center gap-2">
+                          <FileText className="w-4 h-4 text-blue-500" />
+                          <span className="text-sm text-gray-700 font-medium">{source.title || source.document}</span>
+                        </div>
+                        {source.url && source.url !== "#" && (
+                          <a href={source.url} target="_blank" rel="noreferrer" className="text-blue-500 hover:text-blue-700">
+                            <ExternalLink className="w-4 h-4" />
+                          </a>
+                        )}
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              )}
+
+              {confidence !== null && (
+                <div className="mt-3 text-xs text-gray-500 font-medium">
+                  Confidence: {confidence}%
+                </div>
+              )}
+
               {isPlaying && (
-                <div className="flex items-center gap-2 text-sm text-primary">
+                <div className="mt-4 flex items-center gap-2 text-sm text-primary">
                   <Volume2 className="h-4 w-4 animate-pulse" />
                   <span>Playing audio...</span>
                 </div>
